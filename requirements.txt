@@ -1,0 +1,3 @@
+python-chess>=1.999
+numpy>=1.24
+rich>=13.0
