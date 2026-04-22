@@ -53,6 +53,62 @@ _MUTATION = "MUTATION"
 _RANDOM_WIN_THRESHOLD = 100
 _MAX_EVENTS = 12
 
+_SCHEMA = """
+CREATE TABLE IF NOT EXISTS champion (
+    id                  INTEGER PRIMARY KEY CHECK (id = 1),
+    bot_id              TEXT NOT NULL,
+    params_json         TEXT NOT NULL,
+    generation          INTEGER NOT NULL,
+    consecutive_wins    INTEGER NOT NULL DEFAULT 0,
+    mode                TEXT NOT NULL DEFAULT 'RANDOM',
+    total_matches       INTEGER NOT NULL DEFAULT 0,
+    total_champion_changes INTEGER NOT NULL DEFAULT 0,
+    saved_at            REAL NOT NULL
+);
+CREATE TABLE IF NOT EXISTS champion_log (
+    rowid               INTEGER PRIMARY KEY AUTOINCREMENT,
+    bot_id              TEXT NOT NULL,
+    params_json         TEXT NOT NULL,
+    generation          INTEGER NOT NULL,
+    crowned_at          REAL NOT NULL,
+    total_matches_at_crowning INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS matches (
+    rowid               INTEGER PRIMARY KEY AUTOINCREMENT,
+    champion_id         TEXT NOT NULL,
+    challenger_id       TEXT NOT NULL,
+    champion_won        INTEGER NOT NULL,
+    score_champion      REAL NOT NULL,
+    score_challenger    REAL NOT NULL,
+    pairs_played        INTEGER NOT NULL,
+    total_games         INTEGER NOT NULL,
+    generation          INTEGER NOT NULL,
+    mode                TEXT NOT NULL,
+    played_at           REAL NOT NULL
+);
+CREATE TABLE IF NOT EXISTS games (
+    rowid               INTEGER PRIMARY KEY AUTOINCREMENT,
+    match_rowid         INTEGER NOT NULL REFERENCES matches(rowid),
+    pair_number         INTEGER NOT NULL,
+    game_in_pair        INTEGER NOT NULL,
+    white_id            TEXT NOT NULL,
+    black_id            TEXT NOT NULL,
+    result              TEXT NOT NULL,
+    termination         TEXT NOT NULL,
+    halfmoves           INTEGER NOT NULL,
+    duration_s          REAL NOT NULL,
+    pgn                 TEXT NOT NULL
+);
+"""
+
+
+def _init_db(path: Path) -> None:
+    """Create a fresh empty DB with the training schema."""
+    con = sqlite3.connect(str(path))
+    con.executescript(_SCHEMA)
+    con.commit()
+    con.close()
+
 console = Console()
 
 _PIECE_SYMBOLS = {
@@ -519,8 +575,8 @@ def main() -> None:
     main_db = Path(args.db)
 
     if not main_db.exists():
-        console.print(f"[red]Error:[/red] source DB '{main_db}' not found.")
-        sys.exit(1)
+        console.print(f"Source DB '{main_db}' not found — creating new database.")
+        _init_db(main_db)
 
     n = args.workers
     python = sys.executable

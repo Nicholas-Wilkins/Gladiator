@@ -1,28 +1,20 @@
 """
-Parallel RANDOM-phase explorer for Gladiator-NN (GPU/neural-net engine).
+Parallel RANDOM-phase explorer for Gladiator-Mini.
 
-Copies the current NN DB to N worker DBs, launches N headless NN training
-workers with independent RNG seeds, and monitors them via a Rich live
-dashboard until one reaches MUTATION mode (100 consecutive RANDOM wins).
-The winning champion is then promoted back into the main DB and all
-workers are stopped.
+Identical to main_parallel.py but targets the Mini engine (15-win threshold)
+and uses separate worker DB/log files so it does not interfere with the full
+Gladiator worker state.
 
 Usage
 -----
-    python main_nn_parallel.py                   # 2 workers, source gladiator_nn.db
-    python main_nn_parallel.py --workers 3       # 3 workers (check CPU headroom first)
-    python main_nn_parallel.py --db other.db     # different source DB
-    python main_nn_parallel.py --seed 42         # base RNG seed (worker i gets seed+i)
-    python main_nn_parallel.py --poll 10         # poll every 10 s instead of 5
-
-Hardware note
--------------
-Each NN worker uses ~0.5-0.8 CPU cores (Python game loop + board encoding)
-plus a share of the GPU for inference.  With 4 CPU parallel workers already
-running, 2 NN workers is the safe default — leaving ~1 core free for the OS.
+    python main_mini_parallel.py                   # 4 workers, source gladiator_mini.db
+    python main_mini_parallel.py --workers 5       # 5 workers
+    python main_mini_parallel.py --db other.db     # different source DB
+    python main_mini_parallel.py --seed 42         # base RNG seed (worker i gets seed+i)
+    python main_mini_parallel.py --poll 10         # poll every 10 s instead of 5
 
 After this script exits successfully, run:
-    python main_nn.py
+    python main_mini.py
 to resume training in MUTATION mode.
 """
 
@@ -38,7 +30,7 @@ import subprocess
 import sys
 import time
 from collections import deque
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
@@ -56,7 +48,7 @@ from rich.text import Text
 
 _POLL_DEFAULT = 5.0
 _MUTATION = "MUTATION"
-_RANDOM_WIN_THRESHOLD = 100
+_RANDOM_WIN_THRESHOLD = 15
 _MAX_EVENTS = 12
 
 _SCHEMA = """
@@ -138,9 +130,9 @@ _PIECE_SYMBOLS = {
 # ---------------------------------------------------------------------------
 
 def _parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser(description="Parallel Gladiator-NN RANDOM-phase coordinator")
-    p.add_argument("--workers", type=int, default=2, help="Number of parallel workers (default 2)")
-    p.add_argument("--db", default="gladiator_nn.db", help="Source SQLite DB (default gladiator_nn.db)")
+    p = argparse.ArgumentParser(description="Parallel Gladiator-Mini RANDOM-phase coordinator")
+    p.add_argument("--workers", type=int, default=4, help="Number of parallel workers (default 4)")
+    p.add_argument("--db", default="gladiator_mini.db", help="Source SQLite DB (default gladiator_mini.db)")
     p.add_argument("--seed", type=int, default=0, help="Base RNG seed; worker i gets seed+i")
     p.add_argument("--poll", type=float, default=_POLL_DEFAULT, help="Poll interval in seconds (default 5)")
     return p.parse_args()
@@ -151,11 +143,11 @@ def _parse_args() -> argparse.Namespace:
 # ---------------------------------------------------------------------------
 
 def _worker_db(i: int) -> Path:
-    return Path(f"gladiator_nn_worker_{i}.db")
+    return Path(f"gladiator_mini_worker_{i}.db")
 
 
 def _worker_log(i: int) -> Path:
-    return Path(f"gladiator_nn_worker_{i}.log")
+    return Path(f"gladiator_mini_worker_{i}.log")
 
 
 def _read_champion_row(db_path: Path) -> dict | None:
@@ -172,13 +164,6 @@ def _read_champion_row(db_path: Path) -> dict | None:
 
 
 def _query_max_streak(db_path: Path) -> int:
-    """
-    Compute the longest consecutive-win streak from champion_log gaps.
-    Derived from total_matches_at_crowning rather than the champion_won
-    column (which can be unreliable if recorded during a bug window).
-
-        streak(i) = crowning_matches[i+1] - crowning_matches[i] - 1
-    """
     if not db_path.exists():
         return 0
     try:
@@ -209,7 +194,6 @@ def _query_max_streak(db_path: Path) -> int:
 
 
 def _read_latest_board(db_path: Path) -> tuple[chess.Board, str, str, str] | None:
-    """Return (board, last_san, white_id, black_id) from the last completed game, or None."""
     if not db_path.exists():
         return None
     try:
@@ -232,7 +216,6 @@ def _read_latest_board(db_path: Path) -> tuple[chess.Board, str, str, str] | Non
 
 
 def _promote_winner(winner_db: Path, main_db: Path) -> None:
-    """Upsert the winning champion + new champion_log entries into main_db."""
     wcon = sqlite3.connect(str(winner_db))
     wcon.row_factory = sqlite3.Row
     mcon = sqlite3.connect(str(main_db))
@@ -440,7 +423,7 @@ def _worker_panel(i: int, pid: int, snap: WorkerState) -> Panel:
         border = "bright_green"
     else:
         status_text = Text("RUNNING", style="bold green")
-        border = "cyan"
+        border = "blue"
 
     stats = Table.grid(padding=(0, 1))
     stats.add_column(style="dim", min_width=9)
@@ -473,7 +456,7 @@ def _worker_panel(i: int, pid: int, snap: WorkerState) -> Panel:
     board_group = _render_board_inline(snap.board, snap.last_san, snap.white_id, snap.black_id)
     title_style = "bold bright_green" if snap.mode == _MUTATION and snap.alive else "bold"
     content = Group(stats, Rule(style="dim"), board_group)
-    return Panel(content, title=f"[{title_style}]NN Worker {i}[/{title_style}]", border_style=border)
+    return Panel(content, title=f"[{title_style}]Mini Worker {i}[/{title_style}]", border_style=border)
 
 
 def _header_panel(
@@ -505,7 +488,7 @@ def _header_panel(
     grid.add_column(justify="right")
 
     grid.add_row(
-        Text("GLADIATOR-NN — Parallel RANDOM Explorer", style="bold white"),
+        Text("GLADIATOR-MINI — Parallel RANDOM Explorer", style="bold white"),
         Text(f"{n} active workers", style="bold yellow"),
         Text(f"Total matches (all-time): {grand_total:,}", style="bold cyan"),
         Text(f"Elapsed: {h:02d}:{m:02d}:{s:02d}", style="dim"),
@@ -516,7 +499,7 @@ def _header_panel(
         Text(f"Longest win streak so far: {best_streak}", style="bold magenta"),
         Text(""),
     )
-    return Panel(grid, border_style="cyan", padding=(0, 1))
+    return Panel(grid, border_style="blue", padding=(0, 1))
 
 
 def _events_panel(events: deque) -> Panel:
@@ -564,25 +547,25 @@ def main() -> None:
     n = args.workers
     python = sys.executable
 
-    meta_path = Path("gladiator_nn_parallel_meta.json")
+    meta_path = Path("gladiator_mini_parallel_meta.json")
     if meta_path.exists():
         meta = json.loads(meta_path.read_text())
         original_total: int = meta["original_total"]
-        console.print(f"Resuming NN parallel session (pre-parallel baseline: [cyan]{original_total:,}[/cyan] matches).")
+        console.print(f"Resuming Mini parallel session (pre-parallel baseline: [cyan]{original_total:,}[/cyan] matches).")
     else:
         source_row = _read_champion_row(main_db)
         original_total = source_row["total_matches"] if source_row else 0
         meta_path.write_text(json.dumps({"original_total": original_total}))
-        console.print(f"New NN parallel session — pre-parallel baseline: [cyan]{original_total:,}[/cyan] matches.")
+        console.print(f"New Mini parallel session — pre-parallel baseline: [cyan]{original_total:,}[/cyan] matches.")
 
     worker_dbs: list[Path] = []
     for i in range(n):
         wdb = _worker_db(i)
         if wdb.exists():
-            console.print(f"  Resuming NN worker {i} from existing [cyan]{wdb}[/cyan]")
+            console.print(f"  Resuming Mini worker {i} from existing [cyan]{wdb}[/cyan]")
         else:
             shutil.copy2(main_db, wdb)
-            console.print(f"  Created NN worker {i}: copied {main_db} → [cyan]{wdb}[/cyan]")
+            console.print(f"  Created Mini worker {i}: copied {main_db} → [cyan]{wdb}[/cyan]")
         worker_dbs.append(wdb)
 
     baselines = [original_total] * n
@@ -590,7 +573,7 @@ def main() -> None:
     active_db_paths = set(worker_dbs)
     inactive_extra = 0
     historical_max_streak = _query_max_streak(main_db)
-    for wdb in sorted(Path(".").glob("gladiator_nn_worker_*.db")):
+    for wdb in sorted(Path(".").glob("gladiator_mini_worker_*.db")):
         historical_max_streak = max(historical_max_streak, _query_max_streak(wdb))
         if wdb not in active_db_paths:
             row = _read_champion_row(wdb)
@@ -598,19 +581,19 @@ def main() -> None:
                 inactive_extra += max(0, row["total_matches"] - original_total)
     if inactive_extra:
         console.print(
-            f"  Inactive NN worker DBs contribute [cyan]{inactive_extra:,}[/cyan] additional matches to the total."
+            f"  Inactive Mini worker DBs contribute [cyan]{inactive_extra:,}[/cyan] additional matches to the total."
         )
 
-    console.print(f"\nLaunching [bold]{n}[/bold] NN workers…")
+    console.print(f"\nLaunching [bold]{n}[/bold] Mini workers…")
     procs: list[subprocess.Popen] = []
     log_files = []
     for i, wdb in enumerate(worker_dbs):
-        cmd = [python, "main_nn.py", "--no-ui", "--db", str(wdb), "--seed", str(args.seed + i)]
+        cmd = [python, "main_mini.py", "--no-ui", "--db", str(wdb), "--seed", str(args.seed + i)]
         lf = _worker_log(i).open("w")
         log_files.append(lf)
         proc = subprocess.Popen(cmd, stdout=lf, stderr=lf)
         procs.append(proc)
-        console.print(f"  NN Worker {i}: PID [bold]{proc.pid}[/bold] | log [dim]{_worker_log(i)}[/dim]")
+        console.print(f"  Mini Worker {i}: PID [bold]{proc.pid}[/bold] | log [dim]{_worker_log(i)}[/dim]")
 
     snapshots: list[WorkerState] = [WorkerState() for _ in range(n)]
     events: deque = deque(maxlen=_MAX_EVENTS)
@@ -643,11 +626,11 @@ def main() -> None:
             )
             live.update(_display())
 
-    console.print("\nStopping all NN workers…")
+    console.print("\nStopping all Mini workers…")
     _stop_all(procs)
     for lf in log_files:
         lf.close()
-    console.print("All NN workers stopped.")
+    console.print("All Mini workers stopped.")
 
     if winner_idx is not None:
         winner_db = worker_dbs[winner_idx]
@@ -655,11 +638,11 @@ def main() -> None:
         _promote_winner(winner_db, main_db)
         console.print(
             "\n[bold green]Done![/bold green]  "
-            "Run [bold]`python main_nn.py`[/bold] to resume training in MUTATION mode."
+            "Run [bold]`python main_mini.py`[/bold] to resume training in MUTATION mode."
         )
     else:
-        console.print("\nNo winner promoted. NN worker DBs preserved for inspection.")
-        console.print("Re-run [bold]`python main_nn_parallel.py`[/bold] to resume parallel exploration.")
+        console.print("\nNo winner promoted. Mini worker DBs preserved for inspection.")
+        console.print("Re-run [bold]`python main_mini_parallel.py`[/bold] to resume parallel exploration.")
 
 
 if __name__ == "__main__":
