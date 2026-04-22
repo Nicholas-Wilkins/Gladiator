@@ -12,7 +12,7 @@ Both engines follow the same training loop: random bots compete against a reigni
 ## Requirements
 
 - Python 3.10+
-- For Gladiator-NN with GPU acceleration: an NVIDIA GPU with CUDA support
+- For Gladiator-NN with GPU acceleration: an NVIDIA GPU (CUDA), an AMD GPU (ROCm on Linux or DirectML on Windows), or any DirectX 12 GPU on Windows
 
 ---
 
@@ -24,8 +24,23 @@ cd gladiator
 pip install -r requirements.txt
 ```
 
-For the NN engine, also install PyTorch. Visit [pytorch.org](https://pytorch.org/get-started/locally/) and select your platform/CUDA version, or install the CPU-only version:
+For the NN engine, also install PyTorch. The correct command depends on your hardware:
 
+**NVIDIA GPU (Windows or Linux):**
+Visit [pytorch.org](https://pytorch.org/get-started/locally/) and select your platform and CUDA version.
+
+**AMD GPU on Linux (ROCm):**
+```bash
+pip install torch --index-url https://download.pytorch.org/whl/rocm6.2
+```
+
+**AMD GPU on Windows (DirectML):**
+```bash
+pip install torch torch-directml
+```
+`main_nn.py` will automatically detect and use DirectML when `torch-directml` is installed and no CUDA GPU is present.
+
+**CPU only:**
 ```bash
 pip install torch
 ```

@@ -51,7 +51,14 @@ def _pick_device(force_cpu: bool):
     elif torch.cuda.is_available():
         device = torch.device("cuda")
     else:
-        logger.warning("CUDA not available — falling back to CPU.")
+        try:
+            import torch_directml
+            device = torch_directml.device()
+            logger.info("Using device: DirectML (AMD/DirectX 12)")
+            return device
+        except ImportError:
+            pass
+        logger.warning("No GPU backend available — falling back to CPU.")
         device = torch.device("cpu")
     logger.info("Using device: %s", device)
     return device
