@@ -6,8 +6,8 @@ Identical champion/challenger framework as the CPU engine:
   MUTATION mode – challengers are noise-perturbed copies of the champion
 
 The mode switches RANDOM → MUTATION once the champion wins 100 consecutive
-matches against random-weight opponents.  A new champion always resets the
-counter and reverts to RANDOM.
+matches against random-weight opponents.  Once MUTATION mode is entered it
+is permanent — a new champion resets the counter but stays in MUTATION.
 """
 
 from __future__ import annotations
@@ -126,7 +126,7 @@ class Trainer:
             logger.info("Champion DETHRONED. New champion: %s", challenger)
             state.champion = challenger
             state.consecutive_wins = 0
-            state.mode = Mode.RANDOM
+            # mode is intentionally NOT reset — once MUTATION, always MUTATION
             state.total_champion_changes += 1
 
         self.db.save_champion(state.champion, state)

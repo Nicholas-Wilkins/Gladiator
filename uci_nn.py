@@ -1,15 +1,15 @@
 """
-UCI engine wrapper for the Gladiator champion bot.
+UCI engine wrapper for the Gladiator-NN champion bot.
 
 Usage
 -----
-    .venv/bin/python uci.py
-    .venv/bin/python uci.py --db path/to/gladiator.db
-    .venv/bin/python uci.py --db path/to/gladiator.db --bot-id <uuid>
+    .venv/bin/python uci_nn.py
+    .venv/bin/python uci_nn.py --db path/to/gladiator_nn.db
+    .venv/bin/python uci_nn.py --db path/to/gladiator_nn.db --bot-id <uuid>
+    .venv/bin/python uci_nn.py --cpu
 
 Without --bot-id, loads the current champion from the database.
-With --bot-id, loads that specific bot from the champion_log by UUID,
-allowing any past champion to be used as a UCI engine.
+With --bot-id, loads that specific bot from champion_log by UUID.
 
 Point any UCI-compatible GUI (Nibbler, Arena, ChessBase, etc.) at this script
 as a custom engine.
@@ -29,6 +29,20 @@ import numpy as np
 
 def _send(line: str) -> None:
     print(line, flush=True)
+
+
+def _pick_device(force_cpu: bool):
+    import torch
+    if force_cpu:
+        return torch.device("cpu")
+    if torch.cuda.is_available():
+        return torch.device("cuda")
+    try:
+        import torch_directml
+        return torch_directml.device()
+    except ImportError:
+        pass
+    return torch.device("cpu")
 
 
 def _parse_position(tokens: list[str]) -> chess.Board:
@@ -55,10 +69,8 @@ def _parse_position(tokens: list[str]) -> chess.Board:
     return board
 
 
-def _load_bot_by_id(db_path: str, bot_id: str):
-    """Load a specific past champion from champion_log by bot_id."""
-    from gladiator.bot.params import BotParams
-    from gladiator.bot.bot import Bot
+def _load_nn_bot_by_id(db_path: str, bot_id: str, device):
+    from gladiator_nn.bot.bot import NNBot, NNBotParams
 
     con = sqlite3.connect(db_path)
     row = con.execute(
@@ -69,30 +81,32 @@ def _load_bot_by_id(db_path: str, bot_id: str):
     if row is None:
         raise ValueError(f"Bot ID '{bot_id}' not found in champion_log of '{db_path}'")
 
-    params = BotParams.from_json(row[0])
-    return Bot(params), row[1]
+    params = NNBotParams.from_json(row[0])
+    return NNBot(params, device), row[1]
 
 
-class UCIEngine:
-    def __init__(self, db_path: str, bot_id: Optional[str] = None) -> None:
-        from gladiator.bot.bot import Bot
+class UCINNEngine:
+    def __init__(self, db_path: str, device, bot_id: Optional[str] = None) -> None:
+        from gladiator_nn.bot.bot import NNBot
 
         if bot_id:
-            self._bot, gen = _load_bot_by_id(db_path, bot_id)
-            self._name = f"Gladiator gen={gen} depth={self._bot.params.search_depth} id={bot_id[:8]}"
+            self._bot, gen = _load_nn_bot_by_id(db_path, bot_id, device)
+            self._name = f"Gladiator-NN gen={gen} id={bot_id[:8]}"
         else:
-            from gladiator.storage.db import DB
+            from gladiator_nn.storage.db import DB
             db = DB(db_path)
             saved = db.load_champion()
             db.close()
 
             if saved is None:
-                self._bot = Bot.random(generation=0, rng=np.random.default_rng())
-                self._name = "Gladiator (untrained)"
+                self._bot = NNBot.random(generation=0, device=device,
+                                         rng=np.random.default_rng())
+                self._name = "Gladiator-NN (untrained)"
             else:
-                self._bot, meta = saved
-                gen = meta.get("generation", self._bot.generation)
-                self._name = f"Gladiator gen={gen} depth={self._bot.params.search_depth}"
+                params, meta = saved
+                self._bot = NNBot(params, device)
+                gen = meta.get("generation", params.generation)
+                self._name = f"Gladiator-NN gen={gen}"
 
         self._board = chess.Board()
         self._search_thread: Optional[threading.Thread] = None
@@ -148,12 +162,14 @@ class UCIEngine:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Gladiator UCI engine")
-    parser.add_argument("--db", default="gladiator.db", help="SQLite database path")
+    parser = argparse.ArgumentParser(description="Gladiator-NN UCI engine")
+    parser.add_argument("--db", default="gladiator_nn.db", help="SQLite database path")
     parser.add_argument("--bot-id", default=None, help="Load a specific past champion by UUID from champion_log")
+    parser.add_argument("--cpu", action="store_true", help="Force CPU inference")
     args = parser.parse_args()
 
-    UCIEngine(args.db, bot_id=args.bot_id).run()
+    device = _pick_device(args.cpu)
+    UCINNEngine(args.db, device, bot_id=args.bot_id).run()
 
 
 if __name__ == "__main__":

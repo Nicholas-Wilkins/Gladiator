@@ -8,8 +8,8 @@ MUTATION  – challengers are mutations of the reigning champion.
 
 The mode switches from RANDOM to MUTATION once the current champion
 accumulates 100 consecutive wins against random challengers.
-Each time a new champion is crowned the consecutive-win counter resets
-and the mode reverts to RANDOM so every champion must prove itself.
+Once MUTATION mode is entered it is permanent — a new champion resets the
+consecutive-win counter but stays in MUTATION, always facing evolved challengers.
 """
 
 from __future__ import annotations
@@ -149,7 +149,7 @@ class Trainer:
             )
             state.champion = challenger
             state.consecutive_wins = 0
-            state.mode = Mode.RANDOM        # every new champion starts fresh
+            # mode is intentionally NOT reset — once MUTATION, always MUTATION
             state.total_champion_changes += 1
 
         self.db.save_champion(state.champion, state)

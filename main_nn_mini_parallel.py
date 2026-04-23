@@ -285,6 +285,23 @@ def _stop_all(procs: list[subprocess.Popen]) -> None:
             proc.kill()
 
 
+def _best_worker_idx(snapshots: list[WorkerState]) -> int | None:
+    """Return the index of the best worker to promote.
+
+    Prefers workers in MUTATION mode; tiebreaks by consecutive_wins.
+    """
+    best_idx = None
+    best_key: tuple[int, int] = (-1, -1)
+    for i, snap in enumerate(snapshots):
+        if not snap.initialized:
+            continue
+        key = (1 if snap.mode == _MUTATION else 0, snap.consecutive_wins)
+        if key > best_key:
+            best_key = key
+            best_idx = i
+    return best_idx
+
+
 # ---------------------------------------------------------------------------
 # Worker state tracking
 # ---------------------------------------------------------------------------
@@ -604,7 +621,6 @@ def main() -> None:
     snapshots: list[WorkerState] = [WorkerState() for _ in range(n)]
     events: deque = deque(maxlen=_MAX_EVENTS)
     start_time = time.time()
-    winner_idx: int | None = None
     all_time_best_streak = historical_max_streak
 
     def _display():
@@ -617,14 +633,11 @@ def main() -> None:
         try:
             while True:
                 time.sleep(args.poll)
-                winner_idx = _poll_workers(procs, worker_dbs, snapshots, events)
+                _poll_workers(procs, worker_dbs, snapshots, events)
                 for snap in snapshots:
                     if snap.initialized and snap.consecutive_wins > all_time_best_streak:
                         all_time_best_streak = snap.consecutive_wins
                 live.update(_display())
-                if winner_idx is not None:
-                    time.sleep(2)
-                    break
 
         except KeyboardInterrupt:
             events.appendleft(
@@ -638,17 +651,15 @@ def main() -> None:
         lf.close()
     console.print("All NN-Mini workers stopped.")
 
+    winner_idx = _best_worker_idx(snapshots)
     if winner_idx is not None:
         winner_db = worker_dbs[winner_idx]
         console.print(f"\nPromoting champion from [cyan]{winner_db}[/cyan] → [cyan]{main_db}[/cyan]…")
         _promote_winner(winner_db, main_db)
-        console.print(
-            "\n[bold green]Done![/bold green]  "
-            "Run [bold]`python main_nn_mini.py`[/bold] to resume training in MUTATION mode."
-        )
+        console.print("\n[bold green]Done![/bold green]  Champion promoted. Re-run to continue training.")
     else:
-        console.print("\nNo winner promoted. NN-Mini worker DBs preserved for inspection.")
-        console.print("Re-run [bold]`python main_nn_mini_parallel.py`[/bold] to resume parallel exploration.")
+        console.print("\nNo initialized workers. NN-Mini worker DBs preserved for inspection.")
+        console.print("Re-run [bold]`python main_nn_mini_parallel.py`[/bold] to resume.")
 
 
 if __name__ == "__main__":
