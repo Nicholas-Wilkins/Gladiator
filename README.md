@@ -21,29 +21,27 @@ Both engines follow the same training loop: random bots compete against a reigni
 ```bash
 git clone https://github.com/yourusername/gladiator.git
 cd gladiator
+python install.py
+```
+
+`install.py` installs all dependencies and automatically detects your hardware to install the correct PyTorch build — NVIDIA CUDA, AMD ROCm (Linux), AMD/Intel DirectML (Windows), or CPU-only as a fallback. WSL2 is handled correctly.
+
+If you prefer to install manually:
+
+```bash
 pip install -r requirements.txt
 ```
 
-For the NN engine, also install PyTorch. The correct command depends on your hardware:
+Then install PyTorch for your hardware:
 
-**NVIDIA GPU (Windows or Linux):**
-Visit [pytorch.org](https://pytorch.org/get-started/locally/) and select your platform and CUDA version.
+| Hardware | Command |
+|---|---|
+| NVIDIA GPU (CUDA 12.8) | `pip install torch --index-url https://download.pytorch.org/whl/cu128` |
+| AMD GPU — Linux (ROCm) | `pip install torch --index-url https://download.pytorch.org/whl/rocm6.2` |
+| AMD/Intel GPU — Windows (DirectML) | `pip install torch torch-directml` |
+| CPU only | `pip install torch` |
 
-**AMD GPU on Linux (ROCm):**
-```bash
-pip install torch --index-url https://download.pytorch.org/whl/rocm6.2
-```
-
-**AMD GPU on Windows (DirectML):**
-```bash
-pip install torch torch-directml
-```
-`main_nn.py` will automatically detect and use DirectML when `torch-directml` is installed and no CUDA GPU is present.
-
-**CPU only:**
-```bash
-pip install torch
-```
+For other NVIDIA CUDA versions, visit [pytorch.org/get-started/locally](https://pytorch.org/get-started/locally/) to get the exact command for your system.
 
 ---
 

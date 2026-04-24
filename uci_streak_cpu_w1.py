@@ -1,3 +1,4 @@
+#!/home/nick/Projects/consortium/consortium-projects/colosseum/gladiator/.venv/bin/python
 """
 Plug-and-play UCI wrapper for the CPU streak champion from gladiator_worker_1.db.
 
@@ -93,9 +94,15 @@ class _Engine:
             elif cmd == "position":
                 self._board = _parse_position(tokens)
             elif cmd == "go":
+                depth = 5
+                if "depth" in tokens:
+                    try:
+                        depth = int(tokens[tokens.index("depth") + 1])
+                    except (IndexError, ValueError):
+                        pass
                 self._stop.clear()
                 self._thread = threading.Thread(
-                    target=self._search, args=(self._board.copy(),), daemon=True
+                    target=self._search, args=(self._board.copy(), depth), daemon=True
                 )
                 self._thread.start()
             elif cmd == "stop":
@@ -108,9 +115,9 @@ class _Engine:
                     self._thread.join()
                 break
 
-    def _search(self, board: chess.Board) -> None:
-        move = self._bot.choose_move(board)
-        _send(f"info depth {self._bot.params.search_depth}")
+    def _search(self, board: chess.Board, depth: int) -> None:
+        move = self._bot.choose_move(board, depth=depth)
+        _send(f"info depth {depth}")
         _send(f"bestmove {move.uci()}")
 
 

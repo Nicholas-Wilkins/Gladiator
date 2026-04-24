@@ -16,8 +16,9 @@ _INF = float("inf")
 _CONTEMPT = -25  # centipawns: claimable draws are slightly bad for the side to move
 
 
-def best_move(board: chess.Board, params: BotParams, rng=None) -> chess.Move:
+def best_move(board: chess.Board, params: BotParams, rng=None, depth: int | None = None) -> chess.Move:
     """Return the best move for the side to move according to this bot."""
+    search_depth = depth if depth is not None else params.search_depth
     legal = list(board.legal_moves)
     if not legal:
         raise ValueError("No legal moves available")
@@ -31,7 +32,7 @@ def best_move(board: chess.Board, params: BotParams, rng=None) -> chess.Move:
 
     for move in _order_moves(board, legal):
         board.push(move)
-        score = -_negamax(board, params, params.search_depth - 1, -beta, -alpha)
+        score = -_negamax(board, params, search_depth - 1, -beta, -alpha)
         board.pop()
 
         # Sub-centipawn jitter breaks ties without affecting real score differences

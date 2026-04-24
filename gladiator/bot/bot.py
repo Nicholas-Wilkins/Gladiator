@@ -18,9 +18,9 @@ class Bot:
     # Public interface                                                     #
     # ------------------------------------------------------------------ #
 
-    def choose_move(self, board: chess.Board) -> chess.Move:
+    def choose_move(self, board: chess.Board, depth: int | None = None) -> chess.Move:
         """Return the best legal move for the current position."""
-        return best_move(board, self.params, self.rng)
+        return best_move(board, self.params, self.rng, depth=depth)
 
     @property
     def bot_id(self) -> str:
