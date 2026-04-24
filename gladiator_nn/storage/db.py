@@ -114,9 +114,9 @@ class DB:
                 """
                 INSERT INTO champion_log
                     (bot_id, params_json, generation, crowned_at, total_matches_at_crowning)
-                VALUES (?, ?, ?, ?, ?)
+                VALUES (?, '{}', ?, ?, ?)
                 """,
-                (bot.bot_id, params_json, state.generation, now, state.total_matches),
+                (bot.bot_id, state.generation, now, state.total_matches),
             )
 
         self._con.commit()
@@ -188,6 +188,15 @@ class DB:
                     ),
                 )
 
+        # Keep only the most recent 2000 games to bound DB size.
+        self._con.execute(
+            """
+            DELETE FROM games
+            WHERE rowid NOT IN (
+                SELECT rowid FROM games ORDER BY rowid DESC LIMIT 2000
+            )
+            """
+        )
         self._con.commit()
 
     # ------------------------------------------------------------------ #

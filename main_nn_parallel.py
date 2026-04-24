@@ -268,9 +268,9 @@ def _promote_winner(winner_db: Path, main_db: Path) -> None:
                 """
                 INSERT INTO champion_log
                     (bot_id, params_json, generation, crowned_at, total_matches_at_crowning)
-                VALUES (?, ?, ?, ?, ?)
+                VALUES (?, '{}', ?, ?, ?)
                 """,
-                (row["bot_id"], row["params_json"], row["generation"],
+                (row["bot_id"], row["generation"],
                  row["crowned_at"], row["total_matches_at_crowning"]),
             )
 
@@ -556,14 +556,18 @@ def _build_display(
     inactive_extra: int,
     all_time_best_streak: int,
 ) -> Group:
+    workers_per_row = max(1, console.size.width // 38)
     header = _header_panel(
         n, start_time, snapshots, original_total, baselines,
         inactive_extra, all_time_best_streak,
     )
-    worker_panels = [_worker_panel(i, procs[i].pid, snapshots[i]) for i in range(n)]
-    workers_row = Columns(worker_panels, equal=True, expand=True)
+    row_renderables = []
+    for row_start in range(0, n, workers_per_row):
+        row_indices = range(row_start, min(row_start + workers_per_row, n))
+        panels = [_worker_panel(i, procs[i].pid, snapshots[i]) for i in row_indices]
+        row_renderables.append(Columns(panels, equal=True, expand=True))
     ev = _events_panel(events)
-    return Group(header, workers_row, ev)
+    return Group(header, *row_renderables, ev)
 
 
 # ---------------------------------------------------------------------------
