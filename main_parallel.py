@@ -32,20 +32,13 @@ import subprocess
 import sys
 import time
 from collections import deque
-from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
 
 import chess
 import chess.pgn
-from rich import box
-from rich.columns import Columns
-from rich.console import Console, Group
-from rich.live import Live
-from rich.panel import Panel
-from rich.rule import Rule
-from rich.table import Table
-from rich.text import Text
+from rich.console import Console
+
+from gladiator_tui import GladiatorParallelApp, TUIConfig, WorkerState
 
 
 _POLL_DEFAULT = 5.0
@@ -110,21 +103,6 @@ def _init_db(path: Path) -> None:
     con.close()
 
 console = Console()
-
-_PIECE_SYMBOLS = {
-    (chess.PAWN,   chess.WHITE): "♙",
-    (chess.KNIGHT, chess.WHITE): "♘",
-    (chess.BISHOP, chess.WHITE): "♗",
-    (chess.ROOK,   chess.WHITE): "♖",
-    (chess.QUEEN,  chess.WHITE): "♕",
-    (chess.KING,   chess.WHITE): "♔",
-    (chess.PAWN,   chess.BLACK): "♟",
-    (chess.KNIGHT, chess.BLACK): "♞",
-    (chess.BISHOP, chess.BLACK): "♝",
-    (chess.ROOK,   chess.BLACK): "♜",
-    (chess.QUEEN,  chess.BLACK): "♛",
-    (chess.KING,   chess.BLACK): "♚",
-}
 
 
 # ---------------------------------------------------------------------------
@@ -316,25 +294,6 @@ def _best_worker_idx(snapshots: list[WorkerState]) -> int | None:
     return best_idx
 
 
-# ---------------------------------------------------------------------------
-# Worker state tracking
-# ---------------------------------------------------------------------------
-
-@dataclass
-class WorkerState:
-    alive: bool = False
-    initialized: bool = False
-    mode: str = "RANDOM"
-    consecutive_wins: int = 0
-    total_matches: int = 0
-    total_champion_changes: int = 0
-    bot_id: str = ""
-    board: Optional[chess.Board] = None
-    last_san: str = ""
-    white_id: str = ""
-    black_id: str = ""
-
-
 def _poll_workers(
     procs: list[subprocess.Popen],
     worker_dbs: list[Path],
@@ -390,201 +349,6 @@ def _poll_workers(
         snapshots[i] = snap
 
     return winner_idx
-
-
-# ---------------------------------------------------------------------------
-# Rich rendering
-# ---------------------------------------------------------------------------
-
-def _streak_bar(wins: int, width: int = 18) -> Text:
-    filled = min(wins, _RANDOM_WIN_THRESHOLD)
-    n_filled = int(filled / _RANDOM_WIN_THRESHOLD * width)
-    n_empty = width - n_filled
-
-    pct = filled / _RANDOM_WIN_THRESHOLD
-    color = "green" if pct >= 0.75 else ("yellow" if pct >= 0.4 else "red")
-
-    bar = Text()
-    bar.append("[", style="dim")
-    bar.append("█" * n_filled, style=color)
-    bar.append("░" * n_empty, style="dim")
-    bar.append("]", style="dim")
-    return bar
-
-
-def _render_board_inline(
-    board: Optional[chess.Board],
-    last_san: str,
-    white_id: str,
-    black_id: str,
-) -> Group:
-    """Render a chess board as a plain Rich Group (no wrapping Panel)."""
-    if board is None:
-        return Group(Text("  No games completed yet…", style="dim italic"))
-
-    last_move = board.peek() if board.move_stack else None
-    lines = []
-    for rank in range(7, -1, -1):
-        line = Text()
-        line.append(f" {rank + 1} ")
-        for file in range(8):
-            sq = chess.square(file, rank)
-            is_light = (file + rank) % 2 == 1
-            highlighted = last_move is not None and sq in (last_move.from_square, last_move.to_square)
-            if highlighted:
-                bg = "on dark_goldenrod" if is_light else "on yellow4"
-            else:
-                bg = "on grey82" if is_light else "on grey35"
-            piece = board.piece_at(sq)
-            if piece:
-                symbol = _PIECE_SYMBOLS[(piece.piece_type, piece.color)]
-                fg = "bright_white" if piece.color == chess.WHITE else "black"
-                line.append(f" {symbol} ", style=f"{fg} {bg}")
-            else:
-                line.append("   ", style=bg)
-        lines.append(line)
-
-    file_labels = Text("    a  b  c  d  e  f  g  h", style="dim")
-
-    w_label = (white_id[:12] + "…") if white_id and len(white_id) > 13 else (white_id or "?")
-    b_label = (black_id[:12] + "…") if black_id and len(black_id) > 13 else (black_id or "?")
-    players = Text()
-    players.append(f" ♙ {w_label}", style="bright_white")
-    players.append("  vs  ", style="dim")
-    players.append(f"♟ {b_label}", style="bold")
-
-    turn = "White" if board.turn == chess.WHITE else "Black"
-    info = Text()
-    info.append(f" Mv {board.fullmove_number}  ", style="dim")
-    info.append(f"Last: {last_san or '—'}  ", style="bold")
-    info.append(f"{turn} to move", style="green" if board.turn == chess.WHITE else "blue")
-
-    return Group(players, *lines, file_labels, info)
-
-
-def _worker_panel(i: int, pid: int, snap: WorkerState) -> Panel:
-    if not snap.alive:
-        status_text = Text("DEAD", style="bold red")
-        border = "red"
-    elif snap.mode == _MUTATION:
-        status_text = Text("WINNER", style="bold bright_green")
-        border = "bright_green"
-    else:
-        status_text = Text("RUNNING", style="bold green")
-        border = "blue"
-
-    stats = Table.grid(padding=(0, 1))
-    stats.add_column(style="dim", min_width=9)
-    stats.add_column(min_width=20)
-
-    stats.add_row("PID:", str(pid))
-    stats.add_row("Status:", status_text)
-
-    if snap.initialized:
-        mode_text = (
-            Text("● MUTATION", style="bold cyan")
-            if snap.mode == _MUTATION
-            else Text("● RANDOM", style="bold yellow")
-        )
-        stats.add_row("Mode:", mode_text)
-
-        bar = _streak_bar(snap.consecutive_wins)
-        wins_text = Text()
-        wins_text.append_text(bar)
-        wins_text.append(f"  {snap.consecutive_wins}/{_RANDOM_WIN_THRESHOLD}", style="dim")
-        stats.add_row("Streak:", wins_text)
-
-        stats.add_row("Matches:", str(snap.total_matches))
-        stats.add_row("Changes:", str(snap.total_champion_changes))
-        short_id = (snap.bot_id[:16] + "…") if len(snap.bot_id) > 16 else snap.bot_id
-        stats.add_row("Champion:", short_id)
-    else:
-        stats.add_row("", Text("initializing…", style="dim italic"))
-
-    board_group = _render_board_inline(snap.board, snap.last_san, snap.white_id, snap.black_id)
-
-    title_style = "bold bright_green" if snap.mode == _MUTATION and snap.alive else "bold"
-    content = Group(stats, Rule(style="dim"), board_group)
-    return Panel(content, title=f"[{title_style}]Worker {i}[/{title_style}]", border_style=border)
-
-
-def _header_panel(
-    n: int,
-    start_time: float,
-    snapshots: list[WorkerState],
-    original_total: int,
-    baselines: list[int],
-    inactive_extra: int,
-    all_time_best_streak: int,
-) -> Panel:
-    elapsed = int(time.time() - start_time)
-    h, rem = divmod(elapsed, 3600)
-    m, s = divmod(rem, 60)
-
-    # Active workers' new matches + pre-existing inactive worker matches
-    active_new = sum(
-        max(0, snap.total_matches - base)
-        for snap, base in zip(snapshots, baselines)
-    )
-    grand_total = original_total + inactive_extra + active_new
-
-    # Best streak: historical max across all DBs OR current live max
-    live_best = max((s.consecutive_wins for s in snapshots if s.initialized), default=0)
-    best_streak = max(all_time_best_streak, live_best)
-
-    grid = Table.grid(expand=True, padding=(0, 2))
-    grid.add_column(justify="left")
-    grid.add_column(justify="center")
-    grid.add_column(justify="center")
-    grid.add_column(justify="right")
-
-    grid.add_row(
-        Text("GLADIATOR — Parallel RANDOM Explorer", style="bold white"),
-        Text(f"{n} active workers", style="bold yellow"),
-        Text(f"Total matches (all-time): {grand_total:,}", style="bold cyan"),
-        Text(f"Elapsed: {h:02d}:{m:02d}:{s:02d}", style="dim"),
-    )
-    grid.add_row(
-        Text(""),
-        Text(""),
-        Text(f"Longest win streak so far: {best_streak}", style="bold magenta"),
-        Text(""),
-    )
-    return Panel(grid, border_style="blue", padding=(0, 1))
-
-
-def _events_panel(events: deque) -> Panel:
-    content = (
-        Group(*[Text.from_markup(e) for e in events])
-        if events
-        else Text("No events yet…", style="dim italic")
-    )
-    return Panel(content, title="[bold]Events[/bold]", border_style="dim", box=box.SIMPLE_HEAD)
-
-
-def _build_display(
-    n: int,
-    start_time: float,
-    procs: list[subprocess.Popen],
-    snapshots: list[WorkerState],
-    events: deque,
-    original_total: int,
-    baselines: list[int],
-    inactive_extra: int,
-    all_time_best_streak: int,
-) -> Group:
-    workers_per_row = max(1, console.size.width // 38)
-    header = _header_panel(
-        n, start_time, snapshots, original_total, baselines,
-        inactive_extra, all_time_best_streak,
-    )
-    row_renderables = []
-    for row_start in range(0, n, workers_per_row):
-        row_indices = range(row_start, min(row_start + workers_per_row, n))
-        panels = [_worker_panel(i, procs[i].pid, snapshots[i]) for i in row_indices]
-        row_renderables.append(Columns(panels, equal=True, expand=True))
-    ev = _events_panel(events)
-    return Group(header, *row_renderables, ev)
 
 
 # ---------------------------------------------------------------------------
@@ -660,29 +424,17 @@ def main() -> None:
     snapshots: list[WorkerState] = [WorkerState() for _ in range(n)]
     events: deque = deque(maxlen=_MAX_EVENTS)
     start_time = time.time()
-    all_time_best_streak = historical_max_streak
 
-    def _display():
-        return _build_display(
-            n, start_time, procs, snapshots, events,
-            original_total, baselines, inactive_extra, all_time_best_streak,
-        )
+    def _poll():
+        _poll_workers(procs, worker_dbs, snapshots, events)
 
-    with Live(_display(), console=console, refresh_per_second=2, screen=True) as live:
-        try:
-            while True:
-                time.sleep(args.poll)
-                _poll_workers(procs, worker_dbs, snapshots, events)
-                for snap in snapshots:
-                    if snap.initialized and snap.consecutive_wins > all_time_best_streak:
-                        all_time_best_streak = snap.consecutive_wins
-                live.update(_display())
-
-        except KeyboardInterrupt:
-            events.appendleft(
-                f"[{time.strftime('%H:%M:%S')}]  [yellow]Interrupted by user[/yellow]"
-            )
-            live.update(_display())
+    GladiatorParallelApp(
+        cfg=TUIConfig(title="GLADIATOR", header_color="blue", worker_label="Worker", win_threshold=_RANDOM_WIN_THRESHOLD),
+        n=n, procs=procs, snapshots=snapshots, events=events,
+        poll_fn=_poll, poll_interval=args.poll, start_time=start_time,
+        original_total=original_total, baselines=baselines,
+        inactive_extra=inactive_extra, best_streak=historical_max_streak,
+    ).run()
 
     console.print("\nStopping all workers…")
     _stop_all(procs)

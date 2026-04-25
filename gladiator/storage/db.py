@@ -122,9 +122,9 @@ class DB:
                 """
                 INSERT INTO champion_log
                     (bot_id, params_json, generation, crowned_at, total_matches_at_crowning)
-                VALUES (?, '{}', ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?)
                 """,
-                (bot.bot_id, state.generation, now, state.total_matches),
+                (bot.bot_id, params_json, state.generation, now, state.total_matches),
             )
 
         self._con.commit()

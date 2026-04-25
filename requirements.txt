@@ -1,6 +1,7 @@
 python-chess>=1.999
 numpy>=1.24
 rich>=13.0
+textual>=0.40
 
 # PyTorch is required for the NN engine (gladiator_nn).
 # Install the correct build for your hardware — do NOT pip install torch directly
