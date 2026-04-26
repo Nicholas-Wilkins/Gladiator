@@ -410,9 +410,11 @@ def main() -> None:
     snapshots: list[WorkerState] = [WorkerState() for _ in range(n)]
     events: deque = deque(maxlen=_MAX_EVENTS)
     start_time = time.time()
+    mutation_reached = [False]
 
     def _poll():
-        _poll_workers(procs, worker_dbs, snapshots, events)
+        if _poll_workers(procs, worker_dbs, snapshots, events) is not None:
+            mutation_reached[0] = True
 
     GladiatorParallelApp(
         cfg=TUIConfig(title="GLADIATOR-NN", header_color="magenta", worker_label="NN Worker", win_threshold=_RANDOM_WIN_THRESHOLD),
@@ -433,8 +435,12 @@ def main() -> None:
         winner_db = worker_dbs[winner_idx]
         console.print(f"\nPromoting champion from [cyan]{winner_db}[/cyan] → [cyan]{main_db}[/cyan]…")
         _promote_winner(winner_db, main_db)
-        console.print("[bold green]Champion promoted — continuing in MUTATION mode…[/bold green]")
-        os.execv(sys.executable, [sys.executable, "main_nn.py", "--db", str(main_db)])
+        if mutation_reached[0]:
+            console.print("[bold green]Champion promoted — continuing in MUTATION mode…[/bold green]")
+            os.execv(sys.executable, [sys.executable, "main_nn.py", "--db", str(main_db)])
+        else:
+            console.print("\n[bold green]Done![/bold green]  Champion promoted.")
+            console.print(f"Run: [bold]python main_nn.py --db {main_db}[/bold] to continue in mutation mode.")
     else:
         console.print("\nNo initialized workers. NN worker DBs preserved for inspection.")
         console.print("Re-run [bold]`python main_nn_parallel.py`[/bold] to resume.")
