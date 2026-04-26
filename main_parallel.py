@@ -25,6 +25,7 @@ from __future__ import annotations
 import argparse
 import io
 import json
+import os
 import shutil
 import signal
 import sqlite3
@@ -249,9 +250,9 @@ def _promote_winner(winner_db: Path, main_db: Path) -> None:
                 """
                 INSERT INTO champion_log
                     (bot_id, params_json, generation, crowned_at, total_matches_at_crowning)
-                VALUES (?, '{}', ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?)
                 """,
-                (row["bot_id"], row["generation"],
+                (row["bot_id"], row["params_json"], row["generation"],
                  row["crowned_at"], row["total_matches_at_crowning"]),
             )
 
@@ -447,7 +448,8 @@ def main() -> None:
         winner_db = worker_dbs[winner_idx]
         console.print(f"\nPromoting champion from [cyan]{winner_db}[/cyan] → [cyan]{main_db}[/cyan]…")
         _promote_winner(winner_db, main_db)
-        console.print("\n[bold green]Done![/bold green]  Champion promoted. Re-run to continue training.")
+        console.print("[bold green]Champion promoted — continuing in MUTATION mode…[/bold green]")
+        os.execv(sys.executable, [sys.executable, "main.py", "--db", str(main_db)])
     else:
         console.print("\nNo initialized workers. Worker DBs preserved for inspection.")
         console.print("Re-run [bold]`python main_parallel.py`[/bold] to resume.")
