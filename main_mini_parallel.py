@@ -270,13 +270,18 @@ def _stop_all(procs: list[subprocess.Popen]) -> None:
             except ProcessLookupError:
                 pass
 
-    deadline = time.time() + 30
-    for i, proc in enumerate(procs):
-        remaining = max(0.1, deadline - time.time())
+    for proc in procs:
+        if proc.poll() is None:
+            try:
+                proc.kill()
+            except ProcessLookupError:
+                pass
+
+    for proc in procs:
         try:
-            proc.wait(timeout=remaining)
+            proc.wait(timeout=1)
         except subprocess.TimeoutExpired:
-            proc.kill()
+            pass
 
 
 def _best_worker_idx(snapshots: list[WorkerState]) -> int | None:

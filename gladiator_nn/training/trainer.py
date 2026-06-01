@@ -44,6 +44,8 @@ class TrainerState:
     mode: Mode = Mode.RANDOM
     total_matches: int = 0
     total_champion_changes: int = 0
+    max_streak_seen: int = 0
+    streak_at_crowning: int = 0
     start_time: float = field(default_factory=time.time)
 
 
@@ -78,6 +80,9 @@ class Trainer:
         while not self._stop:
             try:
                 self._step(state)
+            except KeyboardInterrupt:
+                self._stop = True
+                logger.warning("Interrupt received — stopping after current match...")
             except Exception as exc:
                 logger.error("Error during training step: %s", exc, exc_info=True)
                 self.db.save_champion(state.champion, state)
@@ -109,6 +114,7 @@ class Trainer:
             rng=self.rng,
             progress_cb=_pair_cb,
             move_cb=self.move_cb,
+            abort_check=lambda: self._stop,
         )
         self._games_played = games_before + match_result.total_games
         state.total_matches += 1
@@ -116,6 +122,7 @@ class Trainer:
         champion_won = match_result.winner_id == state.champion.bot_id
         self.db.save_match(match_result, state)
 
+        streak_broken = None
         if champion_won:
             state.consecutive_wins += 1
             logger.info("Champion RETAINED. Streak: %d", state.consecutive_wins)
@@ -124,12 +131,16 @@ class Trainer:
                 logger.info("*** MODE SWITCH: RANDOM → MUTATION ***")
         else:
             logger.info("Champion DETHRONED. New champion: %s", challenger)
+            streak_broken = state.consecutive_wins
+            state.streak_at_crowning = streak_broken
             state.champion = challenger
             state.consecutive_wins = 0
-            # mode is intentionally NOT reset — once MUTATION, always MUTATION
             state.total_champion_changes += 1
 
         self.db.save_champion(state.champion, state)
+
+        if streak_broken is not None and streak_broken > state.max_streak_seen:
+            state.max_streak_seen = streak_broken
 
         if self.progress_cb:
             self.progress_cb(state, match_result, challenger)
@@ -151,6 +162,7 @@ class Trainer:
                 mode=Mode[meta.get("mode", "RANDOM")],
                 total_matches=meta.get("total_matches", 0),
                 total_champion_changes=meta.get("total_champion_changes", 0),
+                max_streak_seen=meta.get("max_streak_seen", 0),
             )
             logger.info("Resuming from saved champion (gen %d).", state.generation)
             return state
@@ -161,7 +173,7 @@ class Trainer:
         result = play_match(bot_a, bot_b, rng=self.rng)
 
         champion = bot_a if result.winner_id == bot_a.bot_id else bot_b
-        state = TrainerState(champion=champion, generation=1)
+        state = TrainerState(champion=champion, generation=1, streak_at_crowning=0)
         self.db.save_champion(champion, state)
         self.db.save_match(result, state)
         logger.info("Inaugural champion: %s", champion)

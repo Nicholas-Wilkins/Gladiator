@@ -50,7 +50,7 @@ class MatchResult:
         return len(self.pairs) * 2
 
 
-def play_game(white: NNBot, black: NNBot, move_cb=None) -> GameResult:
+def play_game(white: NNBot, black: NNBot, move_cb=None, stop_check=None) -> GameResult:
     board = chess.Board()
     game = chess.pgn.Game()
     game.headers["White"] = white.bot_id
@@ -70,6 +70,19 @@ def play_game(white: NNBot, black: NNBot, move_cb=None) -> GameResult:
         or board.is_fifty_moves()
         or board.is_repetition()
     ):
+        if stop_check and stop_check():
+            termination, winner_id, result_str = "aborted", None, "1/2-1/2"
+            duration = time.time() - t0
+            game.headers["Result"] = result_str
+            return GameResult(
+                pgn=str(game),
+                winner=winner_id,
+                result_str=result_str,
+                termination=termination,
+                halfmoves=len(board.move_stack),
+                duration_s=duration,
+            )
+
         current = white if board.turn == chess.WHITE else black
         move = current.choose_move(board)
 
@@ -111,9 +124,9 @@ def play_game(white: NNBot, black: NNBot, move_cb=None) -> GameResult:
     )
 
 
-def play_pair(bot_a: NNBot, bot_b: NNBot, move_cb=None) -> PairResult:
-    game1 = play_game(white=bot_a, black=bot_b, move_cb=move_cb)
-    game2 = play_game(white=bot_b, black=bot_a, move_cb=move_cb)
+def play_pair(bot_a: NNBot, bot_b: NNBot, move_cb=None, stop_check=None) -> PairResult:
+    game1 = play_game(white=bot_a, black=bot_b, move_cb=move_cb, stop_check=stop_check)
+    game2 = play_game(white=bot_b, black=bot_a, move_cb=move_cb, stop_check=stop_check)
     score_a = _score_for(bot_a.bot_id, game1) + _score_for(bot_a.bot_id, game2)
     score_b = _score_for(bot_b.bot_id, game1) + _score_for(bot_b.bot_id, game2)
     return PairResult(game1=game1, game2=game2, score_a=score_a, score_b=score_b)
@@ -136,14 +149,17 @@ def play_match(
     rng=None,
     progress_cb=None,
     move_cb=None,
+    abort_check=None,
 ) -> MatchResult:
     import random as _random
     result = MatchResult()
     pair_num = 0
 
     while True:
+        if abort_check and abort_check():
+            break
         pair_num += 1
-        pair = play_pair(bot_a, bot_b, move_cb=move_cb)
+        pair = play_pair(bot_a, bot_b, move_cb=move_cb, stop_check=abort_check)
         result.pairs.append(pair)
         result.total_score_a += pair.score_a
         result.total_score_b += pair.score_b

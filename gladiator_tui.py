@@ -6,7 +6,10 @@ four *_parallel.py launchers so display logic lives in one place.
 """
 from __future__ import annotations
 
+import os
+import signal
 import subprocess
+import threading
 import time
 from collections import deque
 from dataclasses import dataclass
@@ -213,7 +216,7 @@ def _header_panel(
         Text(""),
         Text(""),
         Text(f"Longest win streak so far: {best_streak}", style="bold magenta"),
-        Text("Press Q or Ctrl+C to stop", style="dim"),
+        Text("Press q or Ctrl+Q to stop", style="dim"),
     )
     return Panel(grid, border_style=cfg.header_color, padding=(0, 1))
 
@@ -250,7 +253,10 @@ class GladiatorParallelApp(App):
     }
     """
 
-    BINDINGS = [("q", "quit", "Quit")]
+    BINDINGS = [
+        ("q", "quit", "Quit"),
+        ("ctrl+q", "quit", "Quit"),
+    ]
 
     def __init__(
         self,
@@ -322,7 +328,13 @@ class GladiatorParallelApp(App):
         self.query_one("#events", Static).update(_events_panel(self.events))
 
     def action_quit(self) -> None:
-        self.events.appendleft(
-            f"[{time.strftime('%H:%M:%S')}]  [yellow]Stopped by user[/yellow]"
-        )
+        for proc in self.procs:
+            if proc.poll() is None:
+                try:
+                    proc.kill()
+                except ProcessLookupError:
+                    pass
+        t = threading.Timer(2.0, os._exit, [0])
+        t.daemon = True
+        t.start()
         self.exit()

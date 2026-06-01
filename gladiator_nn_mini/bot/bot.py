@@ -33,10 +33,13 @@ class NNBotParams:
     mutation_scale: float = 0.02
     search_depth: int = 1
 
-    def to_json(self) -> str:
-        buf = io.BytesIO()
-        torch.save(self.state_dict, buf)
-        weights_b64 = base64.b64encode(buf.getvalue()).decode()
+    def to_json(self, include_weights: bool = True) -> str:
+        if include_weights:
+            buf = io.BytesIO()
+            torch.save(self.state_dict, buf)
+            weights_b64 = base64.b64encode(buf.getvalue()).decode()
+        else:
+            weights_b64 = None
         return json.dumps({
             "bot_id": self.bot_id,
             "generation": self.generation,
@@ -49,7 +52,13 @@ class NNBotParams:
     @classmethod
     def from_json(cls, s: str) -> "NNBotParams":
         d = json.loads(s)
-        buf = io.BytesIO(base64.b64decode(d["weights_b64"]))
+        weights_b64 = d.get("weights_b64")
+        if weights_b64 is None:
+            raise ValueError(
+                f"Weights not stored for bot {d.get('bot_id')} (non-record champion). "
+                "Record-breaking champions (>= previous max streak) have full weights saved."
+            )
+        buf = io.BytesIO(base64.b64decode(weights_b64))
         state_dict = torch.load(buf, map_location="cpu", weights_only=True)
         return cls(
             bot_id=d["bot_id"],

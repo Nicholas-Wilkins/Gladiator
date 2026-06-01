@@ -84,6 +84,9 @@ class Trainer:
         while not self._stop:
             try:
                 self._step(state)
+            except KeyboardInterrupt:
+                self._stop = True
+                logger.warning("Interrupt received — stopping after current match...")
             except Exception as exc:
                 logger.error("Error during training step: %s", exc, exc_info=True)
                 # Save state and re-raise so the caller can handle it
@@ -120,6 +123,8 @@ class Trainer:
             rng=self.rng,
             progress_cb=_pair_cb,
             move_cb=self.move_cb,
+            abort_check=lambda: self._stop,
+            match_timeout=60,
         )
         self._games_played = games_before + match_result.total_games
         state.total_matches += 1

@@ -266,13 +266,18 @@ def _stop_all(procs: list[subprocess.Popen]) -> None:
             except ProcessLookupError:
                 pass
 
-    deadline = time.time() + 30
-    for i, proc in enumerate(procs):
-        remaining = max(0.1, deadline - time.time())
+    for proc in procs:
+        if proc.poll() is None:
+            try:
+                proc.kill()
+            except ProcessLookupError:
+                pass
+
+    for proc in procs:
         try:
-            proc.wait(timeout=remaining)
+            proc.wait(timeout=1)
         except subprocess.TimeoutExpired:
-            proc.kill()
+            pass
 
 
 def _best_worker_idx(snapshots: list[WorkerState]) -> int | None:
@@ -439,8 +444,8 @@ def main() -> None:
             console.print("[bold green]Champion promoted — continuing in MUTATION mode…[/bold green]")
             os.execv(sys.executable, [sys.executable, "main_nn.py", "--db", str(main_db)])
         else:
-            console.print("\n[bold green]Done![/bold green]  Champion promoted.")
-            console.print(f"Run: [bold]python main_nn.py --db {main_db}[/bold] to continue in mutation mode.")
+            console.print(f"\n[bold green]Done![/bold green]  Champion promoted (mode={snapshots[winner_idx].mode}).")
+            console.print(f"Run: [bold]python main_nn.py --db {main_db}[/bold] to continue training.")
     else:
         console.print("\nNo initialized workers. NN worker DBs preserved for inspection.")
         console.print("Re-run [bold]`python main_nn_parallel.py`[/bold] to resume.")

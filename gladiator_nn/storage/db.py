@@ -25,6 +25,7 @@ CREATE TABLE IF NOT EXISTS champion (
     mode                    TEXT NOT NULL DEFAULT 'RANDOM',
     total_matches           INTEGER NOT NULL DEFAULT 0,
     total_champion_changes  INTEGER NOT NULL DEFAULT 0,
+    max_streak_seen         INTEGER NOT NULL DEFAULT 0,
     saved_at                REAL NOT NULL
 );
 
@@ -34,7 +35,8 @@ CREATE TABLE IF NOT EXISTS champion_log (
     params_json                 TEXT NOT NULL,
     generation                  INTEGER NOT NULL,
     crowned_at                  REAL NOT NULL,
-    total_matches_at_crowning   INTEGER NOT NULL DEFAULT 0
+    total_matches_at_crowning   INTEGER NOT NULL DEFAULT 0,
+    streak_at_crowning          INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS matches (
@@ -81,14 +83,15 @@ class DB:
 
     def save_champion(self, bot: NNBot, state) -> None:
         now = time.time()
-        params_json = bot.params.to_json()
+        # Always save full weights for the current champion (needed for resuming)
+        params_json = bot.params.to_json(include_weights=True)
 
         self._con.execute(
             """
             INSERT INTO champion
                 (id, bot_id, params_json, generation, consecutive_wins, mode,
-                 total_matches, total_champion_changes, saved_at)
-            VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?)
+                 total_matches, total_champion_changes, max_streak_seen, saved_at)
+            VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 bot_id                  = excluded.bot_id,
                 params_json             = excluded.params_json,
@@ -97,14 +100,20 @@ class DB:
                 mode                    = excluded.mode,
                 total_matches           = excluded.total_matches,
                 total_champion_changes  = excluded.total_champion_changes,
+                max_streak_seen         = excluded.max_streak_seen,
                 saved_at                = excluded.saved_at
             """,
             (
                 bot.bot_id, params_json, state.generation,
                 state.consecutive_wins, state.mode.name,
-                state.total_matches, state.total_champion_changes, now,
+                state.total_matches, state.total_champion_changes,
+                state.max_streak_seen, now,
             ),
         )
+
+        # For lineage, only save full weights for record-breaking champions
+        is_record = state.streak_at_crowning > state.max_streak_seen
+        lineage_json = bot.params.to_json(include_weights=is_record)
 
         existing = self._con.execute(
             "SELECT bot_id FROM champion_log WHERE bot_id = ?", (bot.bot_id,)
@@ -113,10 +122,10 @@ class DB:
             self._con.execute(
                 """
                 INSERT INTO champion_log
-                    (bot_id, params_json, generation, crowned_at, total_matches_at_crowning)
-                VALUES (?, ?, ?, ?, ?)
+                    (bot_id, params_json, generation, crowned_at, total_matches_at_crowning, streak_at_crowning)
+                VALUES (?, ?, ?, ?, ?, ?)
                 """,
-                (bot.bot_id, params_json, state.generation, now, state.total_matches),
+                (bot.bot_id, lineage_json, state.generation, now, state.total_matches, state.streak_at_crowning),
             )
 
         self._con.commit()
@@ -133,6 +142,7 @@ class DB:
             "mode": row["mode"],
             "total_matches": row["total_matches"],
             "total_champion_changes": row["total_champion_changes"],
+            "max_streak_seen": row["max_streak_seen"],
         }
         return params, meta
 
@@ -217,7 +227,7 @@ class DB:
 
     def champion_lineage(self) -> list[dict]:
         rows = self._con.execute(
-            "SELECT bot_id, generation, crowned_at, total_matches_at_crowning FROM champion_log ORDER BY rowid"
+            "SELECT bot_id, generation, crowned_at, total_matches_at_crowning, streak_at_crowning FROM champion_log ORDER BY rowid"
         ).fetchall()
         return [dict(r) for r in rows]
 
