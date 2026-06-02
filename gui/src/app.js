@@ -25,7 +25,7 @@ function updateSetup(msg, pct) {
 
 async function pollSetupStatus() {
   try {
-    const status = await window.__TAURI__.invoke("get_setup_status");
+    const status = await window.__TAURI__.core.invoke("get_setup_status");
     if (status.step === "ready") {
       updateSetup("Ready!", 100);
       setTimeout(hideSetup, 400);
