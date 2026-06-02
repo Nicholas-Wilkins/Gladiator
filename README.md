@@ -18,6 +18,20 @@ Both engines follow the same training loop: random bots compete against a reigni
 
 ## Installation
 
+### GUI (recommended)
+
+Download the installer for your platform from the [Releases](https://github.com/yourusername/gladiator/releases) page:
+
+| Platform | File |
+|---|---|
+| **Windows** | `gladiator-windows-amd64` — contains `.msi` and `.exe` installer |
+| **macOS** (Apple Silicon) | `gladiator-macos-aarch64` — contains `.dmg` |
+| **Linux** | `gladiator-linux-amd64` — contains `.deb` and `.AppImage` |
+
+Extract the archive and run the installer. The GUI bundles the engine, the API server, and the training interface into a single desktop application — no terminal or Python setup needed.
+
+### CLI / terminal
+
 ```bash
 git clone https://github.com/yourusername/gladiator.git
 cd gladiator
@@ -47,7 +61,13 @@ For other NVIDIA CUDA versions, visit [pytorch.org/get-started/locally](https://
 
 ## Running
 
-### CPU Engine
+### GUI (recommended)
+
+Launch the installed Gladiator GUI application. The GUI provides a visual interface to start/stop training, monitor progress, view live board positions, and export trained bots — no terminal commands required.
+
+### CLI / terminal
+
+#### CPU Engine
 
 Single training session with dashboard:
 ```bash
@@ -70,7 +90,7 @@ Options:
 --max-games N    Stop after N total games (useful for testing)
 ```
 
-### NN Engine
+#### NN Engine
 
 Single training session with dashboard:
 ```bash
@@ -94,7 +114,7 @@ Options:
 --max-games N    Stop after N total games
 ```
 
-### Running both engines simultaneously
+#### Running both engines simultaneously
 
 Open two terminal windows:
 ```bash
