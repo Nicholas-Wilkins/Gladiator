@@ -7,6 +7,9 @@
     "beforeBuildCommand": ""
   },
   "bundle": {
+    "active": true,
+    "targets": "all",
+    "useLocalToolsDir": true,
     "windows": {
       "wix": {},
       "nsis": {}

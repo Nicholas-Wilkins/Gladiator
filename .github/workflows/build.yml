@@ -49,6 +49,12 @@ jobs:
         run: npx tauri build
         working-directory: gui/src-tauri
 
+      - name: List build output
+        run: ls -la gui/src-tauri/target/release/ 2>/dev/null || echo "No target/release directory"
+
+      - name: List bundle output
+        run: find gui/src-tauri/target/release/bundle -type f 2>/dev/null || echo "No bundle files found"
+
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
