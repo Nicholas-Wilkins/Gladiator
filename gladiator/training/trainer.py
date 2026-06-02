@@ -124,7 +124,6 @@ class Trainer:
             progress_cb=_pair_cb,
             move_cb=self.move_cb,
             abort_check=lambda: self._stop,
-            match_timeout=60,
         )
         self._games_played = games_before + match_result.total_games
         state.total_matches += 1
