@@ -1,5 +1,4 @@
 {
-  "withGlobalTauri": true,
   "productName": "Gladiator",
   "version": "0.1.0",
   "identifier": "com.gladiator.gui",
@@ -24,6 +23,7 @@
     }
   },
   "app": {
+    "withGlobalTauri": true,
     "windows": [
       {
         "title": "Gladiator",
