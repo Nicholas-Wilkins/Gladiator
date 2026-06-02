@@ -126,12 +126,14 @@ fn venv_python(venv_dir: &PathBuf) -> PathBuf {
     if cfg!(target_os = "windows") {
         venv_dir.join("Scripts").join("python.exe")
     } else {
-        let p3 = venv_dir.join("bin").join("python3");
-        if p3.exists() {
-            p3
-        } else {
-            venv_dir.join("bin").join("python")
+        let candidates = ["python3", "python"];
+        for name in &candidates {
+            let p = venv_dir.join("bin").join(name);
+            if p.exists() {
+                return p;
+            }
         }
+        venv_dir.join("bin").join("python3")
     }
 }
 
@@ -259,6 +261,25 @@ fn install_backend(dir: &PathBuf, app: &tauri::AppHandle) {
             update_status(app, "error", &msg, 0);
             return;
         }
+    }
+
+    let python_bin = venv_python(&venv_dir);
+    if !python_bin.exists() {
+        let bin_dir = venv_dir.join("bin");
+        let contents = match std::fs::read_dir(&bin_dir) {
+            Ok(entries) => entries
+                .filter_map(|e| e.ok().map(|e| e.file_name().to_string_lossy().to_string()))
+                .collect::<Vec<_>>()
+                .join(", "),
+            Err(_) => "directory not found".to_string(),
+        };
+        let msg = format!(
+            "Virtual environment created but no Python binary found in {}.\nContents: {}\nThis may indicate a broken or incomplete Python installation.",
+            bin_dir.display(),
+            contents
+        );
+        update_status(app, "error", &msg, 0);
+        return;
     }
 
     update_status(app, "deps", "Installing Python packages\u{2026}", 40);
