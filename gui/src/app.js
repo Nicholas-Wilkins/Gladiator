@@ -2,6 +2,8 @@ const API_BASE = "http://127.0.0.1:8742";
 let ws = null;
 let currentPage = "dashboard";
 let setupResolved = false;
+let setupReadyReceived = false;
+let wsConnected = false;
 
 // ---------------------------------------------------------------------------
 // Setup overlay (shown during first-launch backend installation)
@@ -9,12 +11,20 @@ let setupResolved = false;
 
 const setupOverlay = document.getElementById("setup-overlay");
 const setupMessage = document.getElementById("setup-message");
+const setupNote = document.getElementById("setup-note");
+const setupSpinner = document.querySelector(".setup-spinner");
 const progressFill = document.getElementById("progress-fill");
 
 function hideSetup() {
   if (!setupOverlay) return;
   setupOverlay.classList.add("hidden");
   setupResolved = true;
+}
+
+function tryHideSetup() {
+  if (setupReadyReceived && wsConnected) {
+    hideSetup();
+  }
 }
 
 function updateSetup(msg, pct) {
@@ -28,9 +38,12 @@ async function pollSetupStatus() {
     const status = await window.__TAURI__.core.invoke("get_setup_status");
     if (status.step === "ready") {
       updateSetup("Ready!", 100);
-      setTimeout(hideSetup, 400);
+      setupReadyReceived = true;
+      setTimeout(tryHideSetup, 400);
     } else if (status.step === "error") {
       updateSetup("Error: " + (status.message || "Unknown error"), 0);
+      if (setupSpinner) setupSpinner.style.display = "none";
+      if (setupNote) setupNote.textContent = "Close and re-open the app to try again.";
     } else {
       updateSetup(status.message, status.progress);
     }
@@ -126,7 +139,8 @@ function connectWS() {
     ws.onopen = () => {
       $("#conn-status").className = "status-dot online";
       $("#conn-text").textContent = "Connected";
-      hideSetup();
+      wsConnected = true;
+      tryHideSetup();
     };
     ws.onmessage = (e) => {
       try {

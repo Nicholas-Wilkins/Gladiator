@@ -417,6 +417,7 @@ tr:hover td { background: var(--bg-tertiary); }
   color: var(--text-secondary);
   margin-bottom: 20px;
   min-height: 20px;
+  white-space: pre-wrap;
 }
 .progress-bar {
   height: 6px;

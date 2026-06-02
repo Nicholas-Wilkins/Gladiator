@@ -173,13 +173,45 @@ fn python_name() -> &'static str {
     }
 }
 
-fn is_backend_installed(dir: &PathBuf) -> bool {
-    dir.join(".installed").exists() && venv_python(&dir.join(".venv")).exists()
+fn pip_install(venv_dir: &PathBuf, pkgs: &[&str]) -> Result<String, String> {
+    let out = Command::new(&venv_pip(venv_dir))
+        .args(["install"])
+        .args(pkgs)
+        .output()
+        .map_err(|e| format!("Failed to run pip: {}", e))?;
+    if out.status.success() {
+        let text = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        Ok(text)
+    } else {
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        Err(stderr.trim().to_string())
+    }
 }
 
-fn download_file(url: &str, dest: &PathBuf) {
-    if cfg!(target_os = "windows") {
-        let status = Command::new("powershell")
+fn can_import(python: &PathBuf, module: &str) -> bool {
+    Command::new(python)
+        .args(["-c", &format!("import {}", module)])
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
+
+fn is_backend_installed(dir: &PathBuf) -> bool {
+    let installed = dir.join(".installed").exists();
+    if !installed {
+        return false;
+    }
+    let py = venv_python(&dir.join(".venv"));
+    if !py.exists() {
+        return false;
+    }
+    // Verify the venv is actually functional
+    can_import(&py, "fastapi")
+}
+
+fn download_file(url: &str, dest: &PathBuf, app: &tauri::AppHandle) -> bool {
+    let result = if cfg!(target_os = "windows") {
+        Command::new("powershell")
             .args([
                 "-Command",
                 &format!(
@@ -188,21 +220,35 @@ fn download_file(url: &str, dest: &PathBuf) {
                     dest.display()
                 ),
             ])
-            .status()
-            .expect("Failed to run PowerShell");
-        assert!(status.success(), "Download failed");
+            .output()
     } else {
-        let status = Command::new("curl")
+        Command::new("curl")
             .args(["-L", "-o", &dest.to_string_lossy(), url])
-            .status()
-            .expect("Failed to run curl");
-        assert!(status.success(), "Download failed");
+            .output()
+    };
+
+    match result {
+        Ok(out) if out.status.success() => true,
+        Ok(out) => {
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            update_status(
+                app,
+                "error",
+                &format!("Download failed:\n{}", stderr.trim()),
+                0,
+            );
+            false
+        }
+        Err(e) => {
+            update_status(app, "error", &format!("Failed to run curl: {}", e), 0);
+            false
+        }
     }
 }
 
-fn extract_zip(zip_path: &PathBuf, dest: &PathBuf) {
-    if cfg!(target_os = "windows") {
-        let status = Command::new("powershell")
+fn extract_zip(zip_path: &PathBuf, dest: &PathBuf, app: &tauri::AppHandle) -> bool {
+    let result = if cfg!(target_os = "windows") {
+        Command::new("powershell")
             .args([
                 "-Command",
                 &format!(
@@ -211,20 +257,34 @@ fn extract_zip(zip_path: &PathBuf, dest: &PathBuf) {
                     dest.display()
                 ),
             ])
-            .status()
-            .expect("Failed to run PowerShell");
-        assert!(status.success(), "Extraction failed");
+            .output()
     } else {
-        let status = Command::new("unzip")
+        Command::new("unzip")
             .args([
                 "-o",
                 &zip_path.to_string_lossy(),
                 "-d",
                 &dest.to_string_lossy(),
             ])
-            .status()
-            .expect("Failed to run unzip");
-        assert!(status.success(), "Extraction failed");
+            .output()
+    };
+
+    match result {
+        Ok(out) if out.status.success() => true,
+        Ok(out) => {
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            update_status(
+                app,
+                "error",
+                &format!("Extraction failed:\n{}", stderr.trim()),
+                0,
+            );
+            false
+        }
+        Err(e) => {
+            update_status(app, "error", &format!("Failed to run unzip: {}", e), 0);
+            false
+        }
     }
 }
 
@@ -242,10 +302,14 @@ fn install_backend(dir: &PathBuf, app: &tauri::AppHandle) {
 
     let zip_path = dir.join("repo.zip");
     let url = "https://github.com/Nicholas-Wilkins/Gladiator/archive/refs/heads/main.zip";
-    download_file(url, &zip_path);
+    if !download_file(url, &zip_path, app) {
+        return;
+    }
 
     update_status(app, "extracting", "Extracting files\u{2026}", 20);
-    extract_zip(&zip_path, dir);
+    if !extract_zip(&zip_path, dir, app) {
+        return;
+    }
 
     let extracted = dir.join("Gladiator-main");
     let backend = dir.join("backend");
@@ -342,7 +406,10 @@ fn install_backend(dir: &PathBuf, app: &tauri::AppHandle) {
         }
     }
 
-    std::fs::write(dir.join(".installed"), "").expect("Failed to create installation marker");
+    if std::fs::write(dir.join(".installed"), "").is_err() {
+        update_status(app, "error", "Failed to create installation marker.", 0);
+        return;
+    }
     eprintln!("[gladiator-gui] Backend installation complete!");
 }
 
@@ -361,8 +428,32 @@ fn find_venv_site_packages(venv_dir: &PathBuf) -> Option<PathBuf> {
     }
 }
 
+fn try_start_server(
+    bin: &PathBuf,
+    script: &PathBuf,
+    site_packages: &Option<PathBuf>,
+) -> Result<Child, String> {
+    kill_port(8742);
+    let mut cmd = Command::new(bin);
+    cmd.arg(script).arg("8742");
+    if let Some(sp) = site_packages {
+        cmd.env("PYTHONPATH", sp);
+    }
+    let mut child = cmd.spawn().map_err(|e| format!("Failed to spawn: {}", e))?;
+    std::thread::sleep(std::time::Duration::from_millis(400));
+    match child.try_wait() {
+        Ok(Some(status)) => {
+            let code = status.code().map(|c| c.to_string()).unwrap_or_default();
+            Err(format!("exited immediately (code {})", code))
+        }
+        Ok(None) => Ok(child),
+        Err(e) => Err(format!("process check failed: {}", e)),
+    }
+}
+
 fn start_production_server(app_handle: &tauri::AppHandle) {
     let dir = data_dir();
+    let venv_dir = dir.join(".venv");
     let script = dir.join("backend").join("gladiator_api.py");
 
     update_status(
@@ -372,65 +463,73 @@ fn start_production_server(app_handle: &tauri::AppHandle) {
         95,
     );
 
-    // ── Try #1: venv python ────────────────────────────────────
-    let venv_dir = dir.join(".venv");
-    let python = venv_python(&venv_dir);
-    eprintln!("[gladiator-gui] Trying venv Python: {}", python.display());
+    // ── Find a working python binary ────────────────────────────
+    let venv_py = venv_python(&venv_dir);
+    let system_py = PathBuf::from(python_name());
+    let sp = find_venv_site_packages(&venv_dir);
 
-    let works = python.exists() && Command::new(&python).arg("--version").output().is_ok();
+    let (bin, label) =
+        if venv_py.exists() && Command::new(&venv_py).arg("--version").output().is_ok() {
+            (venv_py, "venv")
+        } else {
+            eprintln!("[gladiator-gui] venv Python broken, using system python");
+            (system_py, "system")
+        };
 
-    let (bin, site_packages) = if works {
-        (python, None)
-    } else {
-        // ── Try #2: system python with venv site-packages ──────
-        let _ = std::fs::remove_file(dir.join(".installed"));
-        let sys_py = python_name();
-        eprintln!(
-            "[gladiator-gui] venv Python broken, falling back to system: {}",
-            sys_py
-        );
-        let sp = find_venv_site_packages(&venv_dir);
-        eprintln!(
-            "[gladiator-gui] venv site-packages: {}",
-            sp.as_ref()
-                .map(|p| p.display().to_string())
-                .unwrap_or_default()
-        );
-        (PathBuf::from(sys_py), sp)
-    };
-
-    kill_port(8742);
-
-    let mut cmd = Command::new(&bin);
-    cmd.arg(&script).arg("8742");
-    if let Some(sp) = &site_packages {
-        cmd.env("PYTHONPATH", sp);
-    }
-
-    match cmd.spawn() {
-        Ok(mut child) => {
-            std::thread::sleep(std::time::Duration::from_millis(300));
-            match child.try_wait() {
-                Ok(Some(status)) => {
-                    let code = status.code().map(|c| c.to_string()).unwrap_or_default();
-                    let msg = format!(
-                        "Python server exited immediately (code {}). Check that fastapi and uvicorn are installed.",
-                        code
-                    );
-                    update_status(app_handle, "error", &msg, 0);
-                }
-                Ok(None) => {
-                    *app_handle.state::<ApiProcess>().0.lock().unwrap() = Some(child);
-                    update_status(app_handle, "ready", "Ready!", 100);
-                }
-                Err(e) => {
-                    let msg = format!("Error checking Python server process: {}", e);
-                    update_status(app_handle, "error", &msg, 0);
+    // ── Ensure critical deps are importable ─────────────────────
+    let python = &bin;
+    for mod_name in &["fastapi"] {
+        if !can_import(python, mod_name) {
+            eprintln!("[gladiator-gui] {} not importable, installing...", mod_name);
+            update_status(
+                app_handle,
+                "deps",
+                "Installing missing Python packages\u{2026}",
+                85,
+            );
+            // Try inside the venv first, then globally
+            let installed = if venv_dir.join("bin").join("pip").exists() {
+                pip_install(&venv_dir, &["fastapi", "uvicorn[standard]"]).is_ok()
+            } else {
+                false
+            };
+            if !installed {
+                // Fall back to system pip
+                let result = Command::new(python)
+                    .args(["-m", "pip", "install", "fastapi", "uvicorn[standard]"])
+                    .output();
+                match result {
+                    Ok(out) if out.status.success() => {}
+                    Ok(out) => {
+                        let stderr = String::from_utf8_lossy(&out.stderr);
+                        let msg = format!("Failed to install fastapi/uvicorn:\n{}", stderr.trim());
+                        update_status(app_handle, "error", &msg, 0);
+                        return;
+                    }
+                    Err(e) => {
+                        let msg = format!("Failed to run pip: {}", e);
+                        update_status(app_handle, "error", &msg, 0);
+                        return;
+                    }
                 }
             }
         }
+    }
+
+    // ── Start the server ────────────────────────────────────────
+    eprintln!(
+        "[gladiator-gui] Starting server with {}: {}",
+        label,
+        python.display()
+    );
+    match try_start_server(python, &script, &sp) {
+        Ok(child) => {
+            *app_handle.state::<ApiProcess>().0.lock().unwrap() = Some(child);
+            update_status(app_handle, "ready", "Ready!", 100);
+        }
         Err(e) => {
-            let msg = format!("Failed to start Python server ({}): {}", bin.display(), e);
+            let _ = std::fs::remove_file(dir.join(".installed"));
+            let msg = format!("Python server {}: {}", e, python.display());
             update_status(app_handle, "error", &msg, 0);
         }
     }
