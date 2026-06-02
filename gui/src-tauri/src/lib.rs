@@ -142,7 +142,11 @@ fn python_name() -> &'static str {
     if cfg!(target_os = "windows") {
         "python"
     } else {
-        "python3"
+        if Command::new("python3").arg("--version").output().is_ok() {
+            "python3"
+        } else {
+            "python"
+        }
     }
 }
 
@@ -227,34 +231,74 @@ fn install_backend(dir: &PathBuf, app: &tauri::AppHandle) {
 
     update_status(app, "venv", "Setting up Python environment\u{2026}", 30);
     let venv_dir = dir.join(".venv");
-    let status = Command::new(python_name())
+    match Command::new(python_name())
         .args(["-m", "venv", &venv_dir.to_string_lossy()])
-        .status()
-        .expect("Failed to create virtual environment");
-    assert!(status.success(), "Failed to create virtual environment");
+        .output()
+    {
+        Ok(out) if out.status.success() => {}
+        Ok(out) => {
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            let msg = format!(
+                "Failed to create Python virtual environment:\n{}",
+                stderr.trim()
+            );
+            update_status(app, "error", &msg, 0);
+            return;
+        }
+        Err(e) => {
+            let msg = format!(
+                "Failed to run Python ({}): {}\nMake sure python3 or python is installed.",
+                python_name(),
+                e
+            );
+            update_status(app, "error", &msg, 0);
+            return;
+        }
+    }
 
     update_status(app, "deps", "Installing Python packages\u{2026}", 40);
     let req_path = backend.join("requirements.txt");
-    let pip_status = Command::new(&venv_pip(&venv_dir))
+    match Command::new(&venv_pip(&venv_dir))
         .args(["install", "-r", &req_path.to_string_lossy()])
-        .status()
-        .expect("Failed to install dependencies");
-    assert!(
-        pip_status.success(),
-        "Failed to install Python dependencies"
-    );
+        .output()
+    {
+        Ok(out) if out.status.success() => {}
+        Ok(out) => {
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            let msg = format!("Failed to install Python packages:\n{}", stderr.trim());
+            update_status(app, "error", &msg, 0);
+            return;
+        }
+        Err(e) => {
+            let msg = format!("Failed to run pip: {}", e);
+            update_status(app, "error", &msg, 0);
+            return;
+        }
+    }
 
     update_status(app, "torch", "Installing PyTorch (CPU-only)\u{2026}", 65);
-    let torch_status = Command::new(&venv_pip(&venv_dir))
+    match Command::new(&venv_pip(&venv_dir))
         .args([
             "install",
             "torch",
             "--index-url",
             "https://download.pytorch.org/whl/cpu",
         ])
-        .status()
-        .expect("Failed to install PyTorch");
-    assert!(torch_status.success(), "Failed to install PyTorch");
+        .output()
+    {
+        Ok(out) if out.status.success() => {}
+        Ok(out) => {
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            let msg = format!("Failed to install PyTorch:\n{}", stderr.trim());
+            update_status(app, "error", &msg, 0);
+            return;
+        }
+        Err(e) => {
+            let msg = format!("Failed to run pip for PyTorch: {}", e);
+            update_status(app, "error", &msg, 0);
+            return;
+        }
+    }
 
     std::fs::write(dir.join(".installed"), "").expect("Failed to create installation marker");
     eprintln!("[gladiator-gui] Backend installation complete!");
