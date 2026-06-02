@@ -1,15 +1,31 @@
+use serde::Serialize;
 use std::path::PathBuf;
 use std::process::{Child, Command};
 use std::sync::Mutex;
-use tauri::{Emitter, Manager};
+use tauri::Manager;
 
 struct ApiProcess(Mutex<Option<Child>>);
 
-fn emit_status(app: &tauri::AppHandle, step: &str, msg: &str, progress: u8) {
-    let _ = app.emit(
-        "setup-status",
-        serde_json::json!({ "step": step, "message": msg, "progress": progress }),
-    );
+#[derive(Clone, Serialize)]
+struct SetupPayload {
+    step: String,
+    message: String,
+    progress: u8,
+}
+
+struct SetupStatus(Mutex<SetupPayload>);
+
+fn update_status(app: &tauri::AppHandle, step: &str, msg: &str, progress: u8) {
+    let state = app.state::<SetupStatus>();
+    let mut guard = state.0.lock().unwrap();
+    guard.step = step.to_string();
+    guard.message = msg.to_string();
+    guard.progress = progress;
+}
+
+#[tauri::command]
+fn get_setup_status(state: tauri::State<SetupStatus>) -> SetupPayload {
+    state.0.lock().unwrap().clone()
 }
 
 // ── Dev mode (used during `cargo tauri dev`) ────────────────────
@@ -187,7 +203,7 @@ fn extract_zip(zip_path: &PathBuf, dest: &PathBuf) {
 
 fn install_backend(dir: &PathBuf, app: &tauri::AppHandle) {
     eprintln!("[gladiator-gui] Installing backend to {}", dir.display());
-    emit_status(
+    update_status(
         app,
         "downloading",
         "Downloading backend from GitHub\u{2026}",
@@ -201,7 +217,7 @@ fn install_backend(dir: &PathBuf, app: &tauri::AppHandle) {
     let url = "https://github.com/Nicholas-Wilkins/Gladiator/archive/refs/heads/main.zip";
     download_file(url, &zip_path);
 
-    emit_status(app, "extracting", "Extracting files\u{2026}", 20);
+    update_status(app, "extracting", "Extracting files\u{2026}", 20);
     extract_zip(&zip_path, dir);
 
     let extracted = dir.join("Gladiator-main");
@@ -209,7 +225,7 @@ fn install_backend(dir: &PathBuf, app: &tauri::AppHandle) {
     std::fs::rename(&extracted, &backend).expect("Failed to rename extracted directory");
     let _ = std::fs::remove_file(&zip_path);
 
-    emit_status(app, "venv", "Setting up Python environment\u{2026}", 30);
+    update_status(app, "venv", "Setting up Python environment\u{2026}", 30);
     let venv_dir = dir.join(".venv");
     let status = Command::new(python_name())
         .args(["-m", "venv", &venv_dir.to_string_lossy()])
@@ -217,7 +233,7 @@ fn install_backend(dir: &PathBuf, app: &tauri::AppHandle) {
         .expect("Failed to create virtual environment");
     assert!(status.success(), "Failed to create virtual environment");
 
-    emit_status(app, "deps", "Installing Python packages\u{2026}", 40);
+    update_status(app, "deps", "Installing Python packages\u{2026}", 40);
     let req_path = backend.join("requirements.txt");
     let pip_status = Command::new(&venv_pip(&venv_dir))
         .args(["install", "-r", &req_path.to_string_lossy()])
@@ -228,7 +244,7 @@ fn install_backend(dir: &PathBuf, app: &tauri::AppHandle) {
         "Failed to install Python dependencies"
     );
 
-    emit_status(app, "torch", "Installing PyTorch (CPU-only)\u{2026}", 65);
+    update_status(app, "torch", "Installing PyTorch (CPU-only)\u{2026}", 65);
     let torch_status = Command::new(&venv_pip(&venv_dir))
         .args([
             "install",
@@ -249,7 +265,7 @@ fn start_production_server(app_handle: &tauri::AppHandle) {
     let python = venv_python(&dir.join(".venv"));
     let script = dir.join("backend").join("gladiator_api.py");
 
-    emit_status(
+    update_status(
         app_handle,
         "starting",
         "Starting backend server\u{2026}",
@@ -270,7 +286,7 @@ fn start_production_server(app_handle: &tauri::AppHandle) {
         .expect("Failed to start Python API server");
 
     *app_handle.state::<ApiProcess>().0.lock().unwrap() = Some(child);
-    emit_status(app_handle, "ready", "Ready!", 100);
+    update_status(app_handle, "ready", "Ready!", 100);
 }
 
 // ── Entry point ─────────────────────────────────────────────────
@@ -281,6 +297,11 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .setup(|app| {
             app.manage(ApiProcess(Mutex::new(None)));
+            app.manage(SetupStatus(Mutex::new(SetupPayload {
+                step: "init".to_string(),
+                message: "Preparing dependencies\u{2026}".to_string(),
+                progress: 0,
+            })));
             let handle = app.handle().clone();
 
             if cfg!(debug_assertions) {
@@ -310,6 +331,7 @@ pub fn run() {
                 }
             }
         })
+        .invoke_handler(tauri::generate_handler![get_setup_status])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

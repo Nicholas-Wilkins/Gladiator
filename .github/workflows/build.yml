@@ -57,6 +57,14 @@ jobs:
       - name: Install Tauri CLI
         run: npm install -g @tauri-apps/cli
 
+      - name: Set version from tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          echo "Setting tauri.conf.json version to $VERSION"
+          jq --arg v "$VERSION" '.version = $v' tauri.conf.json > tauri.conf.tmp
+          mv tauri.conf.tmp tauri.conf.json
+
       - name: Build
         run: npx tauri build
         working-directory: gui/src-tauri

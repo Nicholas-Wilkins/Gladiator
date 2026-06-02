@@ -23,26 +23,24 @@ function updateSetup(msg, pct) {
   if (pct !== undefined) progressFill.style.width = Math.min(pct, 100) + "%";
 }
 
-async function initSetupListener() {
+async function pollSetupStatus() {
   try {
-    const { listen } = await import("@tauri-apps/api/event");
-    await listen("setup-status", (event) => {
-      const { step, message, progress } = event.payload;
-      if (step === "ready") {
-        updateSetup("Ready!", 100);
-        setTimeout(hideSetup, 400);
-      } else if (step === "error") {
-        updateSetup("Error: " + (message || "Unknown error"), 0);
-      } else {
-        updateSetup(message, progress);
-      }
-    });
+    const status = await window.__TAURI__.invoke("get_setup_status");
+    if (status.step === "ready") {
+      updateSetup("Ready!", 100);
+      setTimeout(hideSetup, 400);
+    } else if (status.step === "error") {
+      updateSetup("Error: " + (status.message || "Unknown error"), 0);
+    } else {
+      updateSetup(status.message, status.progress);
+    }
   } catch (_) {
-    // Not running inside Tauri (e.g. plain browser) — skip
+    // Not running inside Tauri or command not available yet
   }
 }
 
-initSetupListener();
+setInterval(pollSetupStatus, 2000);
+pollSetupStatus();
 
 // Fallback: if WebSocket connects before any setup event, hide overlay
 // (covers dev mode and subsequent launches where server starts fast)
