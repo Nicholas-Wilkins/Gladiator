@@ -408,9 +408,26 @@ fn start_production_server(app_handle: &tauri::AppHandle) {
     }
 
     match cmd.spawn() {
-        Ok(child) => {
-            *app_handle.state::<ApiProcess>().0.lock().unwrap() = Some(child);
-            update_status(app_handle, "ready", "Ready!", 100);
+        Ok(mut child) => {
+            std::thread::sleep(std::time::Duration::from_millis(300));
+            match child.try_wait() {
+                Ok(Some(status)) => {
+                    let code = status.code().map(|c| c.to_string()).unwrap_or_default();
+                    let msg = format!(
+                        "Python server exited immediately (code {}). Check that fastapi and uvicorn are installed.",
+                        code
+                    );
+                    update_status(app_handle, "error", &msg, 0);
+                }
+                Ok(None) => {
+                    *app_handle.state::<ApiProcess>().0.lock().unwrap() = Some(child);
+                    update_status(app_handle, "ready", "Ready!", 100);
+                }
+                Err(e) => {
+                    let msg = format!("Error checking Python server process: {}", e);
+                    update_status(app_handle, "error", &msg, 0);
+                }
+            }
         }
         Err(e) => {
             let msg = format!("Failed to start Python server ({}): {}", bin.display(), e);
