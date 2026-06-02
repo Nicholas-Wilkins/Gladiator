@@ -126,7 +126,12 @@ fn venv_python(venv_dir: &PathBuf) -> PathBuf {
     if cfg!(target_os = "windows") {
         venv_dir.join("Scripts").join("python.exe")
     } else {
-        venv_dir.join("bin").join("python3")
+        let p3 = venv_dir.join("bin").join("python3");
+        if p3.exists() {
+            p3
+        } else {
+            venv_dir.join("bin").join("python")
+        }
     }
 }
 
@@ -151,7 +156,7 @@ fn python_name() -> &'static str {
 }
 
 fn is_backend_installed(dir: &PathBuf) -> bool {
-    dir.join(".installed").exists() && venv_python(dir).exists()
+    dir.join(".installed").exists() && venv_python(&dir.join(".venv")).exists()
 }
 
 fn download_file(url: &str, dest: &PathBuf) {
@@ -323,14 +328,20 @@ fn start_production_server(app_handle: &tauri::AppHandle) {
 
     kill_port(8742);
 
-    let child = Command::new(&python)
-        .arg(&script)
-        .arg("8742")
-        .spawn()
-        .expect("Failed to start Python API server");
-
-    *app_handle.state::<ApiProcess>().0.lock().unwrap() = Some(child);
-    update_status(app_handle, "ready", "Ready!", 100);
+    match Command::new(&python).arg(&script).arg("8742").spawn() {
+        Ok(child) => {
+            *app_handle.state::<ApiProcess>().0.lock().unwrap() = Some(child);
+            update_status(app_handle, "ready", "Ready!", 100);
+        }
+        Err(e) => {
+            let msg = format!(
+                "Failed to start Python server at {}: {}",
+                python.display(),
+                e
+            );
+            update_status(app_handle, "error", &msg, 0);
+        }
+    }
 }
 
 // ── Entry point ─────────────────────────────────────────────────
