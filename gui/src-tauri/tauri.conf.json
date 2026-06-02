@@ -1,0 +1,29 @@
+{
+  "productName": "Gladiator",
+  "version": "0.1.0",
+  "identifier": "com.gladiator.gui",
+  "build": {
+    "frontendDist": "../src",
+    "beforeBuildCommand": ""
+  },
+  "bundle": {
+    "windows": {
+      "wix": {},
+      "nsis": {}
+    }
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "Gladiator",
+        "width": 1200,
+        "height": 800,
+        "resizable": true,
+        "fullscreen": false
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; connect-src 'self' http://127.0.0.1:8742 ws://127.0.0.1:8742; style-src 'self' 'unsafe-inline'; font-src 'self' data:"
+    }
+  }
+}

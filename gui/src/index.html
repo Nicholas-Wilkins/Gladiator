@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Gladiator</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div id="app">
+  <aside id="sidebar">
+    <div class="sidebar-header">
+      <h1>Gladiator</h1>
+      <span class="subtitle">Chess Engine Trainer</span>
+    </div>
+    <nav>
+      <button class="nav-btn active" data-page="dashboard">
+        <span class="nav-icon">&#9632;</span> Dashboard
+      </button>
+      <button class="nav-btn" data-page="training">
+        <span class="nav-icon">&#9654;</span> Training
+      </button>
+      <button class="nav-btn" data-page="champion">
+        <span class="nav-icon">&#9733;</span> Champions
+      </button>
+    </nav>
+    <div class="sidebar-status">
+      <span id="conn-status" class="status-dot offline"></span>
+      <span id="conn-text">Disconnected</span>
+    </div>
+  </aside>
+
+  <main id="content">
+    <!-- Dashboard -->
+    <section id="page-dashboard" class="page active">
+      <header><h2>Dashboard</h2></header>
+      <div class="engine-grid" id="engine-cards"></div>
+      <section class="section-card">
+        <h3>Active Sessions</h3>
+        <div id="session-list">
+          <p class="empty-state">No training sessions running.</p>
+        </div>
+      </section>
+    </section>
+
+    <!-- Training -->
+    <section id="page-training" class="page">
+      <header><h2>Start Training</h2></header>
+      <div class="form-card">
+        <div class="form-row">
+          <label for="tr-engine">Engine</label>
+          <select id="tr-engine">
+            <option value="cpu">CPU Heuristic</option>
+            <option value="nn">Neural Network (GPU/CPU)</option>
+            <option value="mini">CPU Mini</option>
+            <option value="nn-mini">NN Mini</option>
+          </select>
+        </div>
+        <div class="form-row">
+          <label for="tr-workers">Workers</label>
+          <input type="number" id="tr-workers" value="1" min="1" max="16" placeholder="1">
+        </div>
+        <div class="form-row">
+          <label for="tr-seed">Seed (optional)</label>
+          <input type="number" id="tr-seed" placeholder="Random">
+        </div>
+        <div class="form-row">
+          <label for="tr-max-games">Max Games (optional)</label>
+          <input type="number" id="tr-max-games" placeholder="Unlimited">
+        </div>
+        <div class="form-actions">
+          <button id="btn-start" class="btn primary">Start Training</button>
+        </div>
+      </div>
+      <div id="training-sessions" class="section-card">
+        <h3>Active Sessions</h3>
+        <div id="training-session-list">
+          <p class="empty-state">No training sessions running.</p>
+        </div>
+        <div class="form-actions" id="promote-actions" style="display:none;margin-top:12px;padding-top:12px;border-top:1px solid var(--border)">
+          <button id="btn-promote-best" class="btn secondary">Promote Best Worker</button>
+        </div>
+      </div>
+      <div id="training-log" class="log-area"></div>
+    </section>
+
+    <!-- Champion -->
+    <section id="page-champion" class="page">
+      <header><h2>Champion</h2></header>
+      <div class="form-row">
+        <label for="ch-engine">Engine</label>
+        <select id="ch-engine">
+          <option value="cpu">CPU Heuristic</option>
+          <option value="nn">Neural Network (GPU/CPU)</option>
+          <option value="mini">CPU Mini</option>
+          <option value="nn-mini">NN Mini</option>
+        </select>
+        <button id="ch-refresh" class="btn">Refresh</button>
+      </div>
+      <div id="champion-card" class="section-card"></div>
+      <section class="section-card">
+        <h3>Lineage</h3>
+        <div id="lineage-table"></div>
+      </section>
+      <section class="section-card">
+        <h3>Recent Matches</h3>
+        <div id="stats-table"></div>
+      </section>
+      <div class="form-actions">
+        <button id="ch-export" class="btn">Export Bot</button>
+        <button id="ch-promote" class="btn secondary">Promote to Mutation</button>
+      </div>
+      <div id="champion-output" class="log-area"></div>
+    </section>
+  </main>
+</div>
+
+<div id="toast-container"></div>
+<script src="app.js"></script>
+</body>
+</html>
