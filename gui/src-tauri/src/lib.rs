@@ -126,11 +126,27 @@ fn venv_python(venv_dir: &PathBuf) -> PathBuf {
     if cfg!(target_os = "windows") {
         venv_dir.join("Scripts").join("python.exe")
     } else {
+        let bin = venv_dir.join("bin");
         let candidates = ["python3", "python"];
         for name in &candidates {
-            let p = venv_dir.join("bin").join(name);
+            let p = bin.join(name);
             if p.exists() {
                 return p;
+            }
+        }
+        if let Ok(entries) = std::fs::read_dir(&bin) {
+            let mut pythons: Vec<_> = entries
+                .filter_map(|e| e.ok())
+                .filter(|e| {
+                    let name = e.file_name();
+                    let s = name.to_string_lossy();
+                    s.starts_with("python") || s.starts_with("python3")
+                })
+                .map(|e| e.path())
+                .collect();
+            pythons.sort();
+            if let Some(p) = pythons.first() {
+                return p.clone();
             }
         }
         venv_dir.join("bin").join("python3")
@@ -330,9 +346,23 @@ fn install_backend(dir: &PathBuf, app: &tauri::AppHandle) {
     eprintln!("[gladiator-gui] Backend installation complete!");
 }
 
+fn find_venv_site_packages(venv_dir: &PathBuf) -> Option<PathBuf> {
+    let lib = venv_dir.join("lib");
+    let ok = std::fs::read_dir(&lib).ok()?;
+    let py_ver = ok
+        .filter_map(|e| e.ok())
+        .map(|e| e.file_name())
+        .find(|n| n.to_string_lossy().starts_with("python3"))?;
+    let sp = lib.join(&py_ver).join("site-packages");
+    if sp.exists() {
+        Some(sp)
+    } else {
+        None
+    }
+}
+
 fn start_production_server(app_handle: &tauri::AppHandle) {
     let dir = data_dir();
-    let python = venv_python(&dir.join(".venv"));
     let script = dir.join("backend").join("gladiator_api.py");
 
     update_status(
@@ -341,25 +371,49 @@ fn start_production_server(app_handle: &tauri::AppHandle) {
         "Starting backend server\u{2026}",
         95,
     );
-    eprintln!(
-        "[gladiator-gui] Starting API server: {} {}",
-        python.display(),
-        script.display()
-    );
+
+    // ── Try #1: venv python ────────────────────────────────────
+    let venv_dir = dir.join(".venv");
+    let python = venv_python(&venv_dir);
+    eprintln!("[gladiator-gui] Trying venv Python: {}", python.display());
+
+    let works = python.exists() && Command::new(&python).arg("--version").output().is_ok();
+
+    let (bin, site_packages) = if works {
+        (python, None)
+    } else {
+        // ── Try #2: system python with venv site-packages ──────
+        let _ = std::fs::remove_file(dir.join(".installed"));
+        let sys_py = python_name();
+        eprintln!(
+            "[gladiator-gui] venv Python broken, falling back to system: {}",
+            sys_py
+        );
+        let sp = find_venv_site_packages(&venv_dir);
+        eprintln!(
+            "[gladiator-gui] venv site-packages: {}",
+            sp.as_ref()
+                .map(|p| p.display().to_string())
+                .unwrap_or_default()
+        );
+        (PathBuf::from(sys_py), sp)
+    };
 
     kill_port(8742);
 
-    match Command::new(&python).arg(&script).arg("8742").spawn() {
+    let mut cmd = Command::new(&bin);
+    cmd.arg(&script).arg("8742");
+    if let Some(sp) = &site_packages {
+        cmd.env("PYTHONPATH", sp);
+    }
+
+    match cmd.spawn() {
         Ok(child) => {
             *app_handle.state::<ApiProcess>().0.lock().unwrap() = Some(child);
             update_status(app_handle, "ready", "Ready!", 100);
         }
         Err(e) => {
-            let msg = format!(
-                "Failed to start Python server at {}: {}",
-                python.display(),
-                e
-            );
+            let msg = format!("Failed to start Python server ({}): {}", bin.display(), e);
             update_status(app_handle, "error", &msg, 0);
         }
     }
