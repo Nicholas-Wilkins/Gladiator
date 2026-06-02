@@ -1,6 +1,51 @@
 const API_BASE = "http://127.0.0.1:8742";
 let ws = null;
 let currentPage = "dashboard";
+let setupResolved = false;
+
+// ---------------------------------------------------------------------------
+// Setup overlay (shown during first-launch backend installation)
+// ---------------------------------------------------------------------------
+
+const setupOverlay = document.getElementById("setup-overlay");
+const setupMessage = document.getElementById("setup-message");
+const progressFill = document.getElementById("progress-fill");
+
+function hideSetup() {
+  if (!setupOverlay) return;
+  setupOverlay.classList.add("hidden");
+  setupResolved = true;
+}
+
+function updateSetup(msg, pct) {
+  if (!setupMessage || !progressFill) return;
+  if (msg) setupMessage.textContent = msg;
+  if (pct !== undefined) progressFill.style.width = Math.min(pct, 100) + "%";
+}
+
+async function initSetupListener() {
+  try {
+    const { listen } = await import("@tauri-apps/api/event");
+    await listen("setup-status", (event) => {
+      const { step, message, progress } = event.payload;
+      if (step === "ready") {
+        updateSetup("Ready!", 100);
+        setTimeout(hideSetup, 400);
+      } else if (step === "error") {
+        updateSetup("Error: " + (message || "Unknown error"), 0);
+      } else {
+        updateSetup(message, progress);
+      }
+    });
+  } catch (_) {
+    // Not running inside Tauri (e.g. plain browser) — skip
+  }
+}
+
+initSetupListener();
+
+// Fallback: if WebSocket connects before any setup event, hide overlay
+// (covers dev mode and subsequent launches where server starts fast)
 
 const _PIECE_MAP = {
   "♙": "P", "♘": "N", "♗": "B", "♖": "R", "♕": "Q", "♔": "K",
@@ -83,6 +128,7 @@ function connectWS() {
     ws.onopen = () => {
       $("#conn-status").className = "status-dot online";
       $("#conn-text").textContent = "Connected";
+      hideSetup();
     };
     ws.onmessage = (e) => {
       try {

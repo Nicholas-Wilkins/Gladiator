@@ -20,7 +20,7 @@ Both engines follow the same training loop: random bots compete against a reigni
 
 ### GUI (recommended)
 
-Download the installer for your platform from the [Releases](https://github.com/yourusername/gladiator/releases) page:
+Download the installer for your platform from the [Releases](https://github.com/Nicholas-Wilkins/Gladiator/releases) page:
 
 | Platform | File |
 |---|---|
@@ -33,7 +33,7 @@ Extract the archive and run the installer. The GUI bundles the engine, the API s
 ### CLI / terminal
 
 ```bash
-git clone https://github.com/yourusername/gladiator.git
+git clone https://github.com/Nicholas-Wilkins/Gladiator.git
 cd gladiator
 python install.py
 ```

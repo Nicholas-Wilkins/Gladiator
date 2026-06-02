@@ -1,9 +1,18 @@
 use std::path::PathBuf;
 use std::process::{Child, Command};
 use std::sync::Mutex;
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 
 struct ApiProcess(Mutex<Option<Child>>);
+
+fn emit_status(app: &tauri::AppHandle, step: &str, msg: &str, progress: u8) {
+    let _ = app.emit(
+        "setup-status",
+        serde_json::json!({ "step": step, "message": msg, "progress": progress }),
+    );
+}
+
+// ── Dev mode (used during `cargo tauri dev`) ────────────────────
 
 fn find_project_root() -> PathBuf {
     let cwd = std::env::current_dir().unwrap_or_default();
@@ -34,36 +43,259 @@ fn find_python() -> String {
     "python3".to_string()
 }
 
+fn kill_port(port: u16) {
+    if cfg!(target_os = "windows") {
+        Command::new("powershell")
+            .args([
+                "-Command",
+                &format!("Get-Process -Id (Get-NetTCPConnection -LocalPort {}).OwningProcess -ErrorAction SilentlyContinue | Stop-Process -Force", port),
+            ])
+            .status()
+            .ok();
+    } else {
+        Command::new("sh")
+            .arg("-c")
+            .arg(format!("fuser -k {}/tcp 2>/dev/null; exit 0", port))
+            .status()
+            .ok();
+    }
+}
+
+fn start_dev_server(app_handle: &tauri::AppHandle) {
+    let root = find_project_root();
+    let python = find_python();
+    let script = root.join("gladiator_api.py");
+
+    eprintln!(
+        "[gladiator-gui] Starting API server: {} {}",
+        python,
+        script.display()
+    );
+
+    kill_port(8742);
+
+    let child = Command::new(&python)
+        .arg(&script)
+        .arg("8742")
+        .spawn()
+        .expect("Failed to start Python API server");
+
+    *app_handle.state::<ApiProcess>().0.lock().unwrap() = Some(child);
+}
+
+// ── Production mode (used in release builds) ────────────────────
+
+fn data_dir() -> PathBuf {
+    let base = if cfg!(target_os = "windows") {
+        std::env::var("APPDATA")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| PathBuf::from("."))
+    } else if cfg!(target_os = "macos") {
+        let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+        PathBuf::from(home)
+            .join("Library")
+            .join("Application Support")
+    } else {
+        std::env::var("XDG_DATA_HOME")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| {
+                let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+                PathBuf::from(home).join(".local").join("share")
+            })
+    };
+    base.join("gladiator")
+}
+
+fn venv_python(venv_dir: &PathBuf) -> PathBuf {
+    if cfg!(target_os = "windows") {
+        venv_dir.join("Scripts").join("python.exe")
+    } else {
+        venv_dir.join("bin").join("python3")
+    }
+}
+
+fn venv_pip(venv_dir: &PathBuf) -> PathBuf {
+    if cfg!(target_os = "windows") {
+        venv_dir.join("Scripts").join("pip.exe")
+    } else {
+        venv_dir.join("bin").join("pip")
+    }
+}
+
+fn python_name() -> &'static str {
+    if cfg!(target_os = "windows") {
+        "python"
+    } else {
+        "python3"
+    }
+}
+
+fn is_backend_installed(dir: &PathBuf) -> bool {
+    dir.join(".installed").exists() && venv_python(dir).exists()
+}
+
+fn download_file(url: &str, dest: &PathBuf) {
+    if cfg!(target_os = "windows") {
+        let status = Command::new("powershell")
+            .args([
+                "-Command",
+                &format!(
+                    "Invoke-WebRequest -Uri '{}' -OutFile '{}'",
+                    url,
+                    dest.display()
+                ),
+            ])
+            .status()
+            .expect("Failed to run PowerShell");
+        assert!(status.success(), "Download failed");
+    } else {
+        let status = Command::new("curl")
+            .args(["-L", "-o", &dest.to_string_lossy(), url])
+            .status()
+            .expect("Failed to run curl");
+        assert!(status.success(), "Download failed");
+    }
+}
+
+fn extract_zip(zip_path: &PathBuf, dest: &PathBuf) {
+    if cfg!(target_os = "windows") {
+        let status = Command::new("powershell")
+            .args([
+                "-Command",
+                &format!(
+                    "Expand-Archive -Path '{}' -DestinationPath '{}' -Force",
+                    zip_path.display(),
+                    dest.display()
+                ),
+            ])
+            .status()
+            .expect("Failed to run PowerShell");
+        assert!(status.success(), "Extraction failed");
+    } else {
+        let status = Command::new("unzip")
+            .args([
+                "-o",
+                &zip_path.to_string_lossy(),
+                "-d",
+                &dest.to_string_lossy(),
+            ])
+            .status()
+            .expect("Failed to run unzip");
+        assert!(status.success(), "Extraction failed");
+    }
+}
+
+fn install_backend(dir: &PathBuf, app: &tauri::AppHandle) {
+    eprintln!("[gladiator-gui] Installing backend to {}", dir.display());
+    emit_status(
+        app,
+        "downloading",
+        "Downloading backend from GitHub\u{2026}",
+        5,
+    );
+
+    let _ = std::fs::remove_dir_all(dir);
+    std::fs::create_dir_all(dir).expect("Failed to create backend directory");
+
+    let zip_path = dir.join("repo.zip");
+    let url = "https://github.com/Nicholas-Wilkins/Gladiator/archive/refs/heads/main.zip";
+    download_file(url, &zip_path);
+
+    emit_status(app, "extracting", "Extracting files\u{2026}", 20);
+    extract_zip(&zip_path, dir);
+
+    let extracted = dir.join("Gladiator-main");
+    let backend = dir.join("backend");
+    std::fs::rename(&extracted, &backend).expect("Failed to rename extracted directory");
+    let _ = std::fs::remove_file(&zip_path);
+
+    emit_status(app, "venv", "Setting up Python environment\u{2026}", 30);
+    let venv_dir = dir.join(".venv");
+    let status = Command::new(python_name())
+        .args(["-m", "venv", &venv_dir.to_string_lossy()])
+        .status()
+        .expect("Failed to create virtual environment");
+    assert!(status.success(), "Failed to create virtual environment");
+
+    emit_status(app, "deps", "Installing Python packages\u{2026}", 40);
+    let req_path = backend.join("requirements.txt");
+    let pip_status = Command::new(&venv_pip(&venv_dir))
+        .args(["install", "-r", &req_path.to_string_lossy()])
+        .status()
+        .expect("Failed to install dependencies");
+    assert!(
+        pip_status.success(),
+        "Failed to install Python dependencies"
+    );
+
+    emit_status(app, "torch", "Installing PyTorch (CPU-only)\u{2026}", 65);
+    let torch_status = Command::new(&venv_pip(&venv_dir))
+        .args([
+            "install",
+            "torch",
+            "--index-url",
+            "https://download.pytorch.org/whl/cpu",
+        ])
+        .status()
+        .expect("Failed to install PyTorch");
+    assert!(torch_status.success(), "Failed to install PyTorch");
+
+    std::fs::write(dir.join(".installed"), "").expect("Failed to create installation marker");
+    eprintln!("[gladiator-gui] Backend installation complete!");
+}
+
+fn start_production_server(app_handle: &tauri::AppHandle) {
+    let dir = data_dir();
+    let python = venv_python(&dir.join(".venv"));
+    let script = dir.join("backend").join("gladiator_api.py");
+
+    emit_status(
+        app_handle,
+        "starting",
+        "Starting backend server\u{2026}",
+        95,
+    );
+    eprintln!(
+        "[gladiator-gui] Starting API server: {} {}",
+        python.display(),
+        script.display()
+    );
+
+    kill_port(8742);
+
+    let child = Command::new(&python)
+        .arg(&script)
+        .arg("8742")
+        .spawn()
+        .expect("Failed to start Python API server");
+
+    *app_handle.state::<ApiProcess>().0.lock().unwrap() = Some(child);
+    emit_status(app_handle, "ready", "Ready!", 100);
+}
+
+// ── Entry point ─────────────────────────────────────────────────
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .setup(|app| {
-            let root = find_project_root();
-            let python = find_python();
-            let script = root.join("gladiator_api.py");
+            app.manage(ApiProcess(Mutex::new(None)));
+            let handle = app.handle().clone();
 
-            eprintln!(
-                "[gladiator-gui] Starting API server: {} {}",
-                python,
-                script.display()
-            );
+            if cfg!(debug_assertions) {
+                start_dev_server(&handle);
+                std::thread::sleep(std::time::Duration::from_secs(2));
+            } else {
+                std::thread::spawn(move || {
+                    let dir = data_dir();
+                    if !is_backend_installed(&dir) {
+                        install_backend(&dir, &handle);
+                    }
+                    start_production_server(&handle);
+                });
+            }
 
-            // Kill leftover processes on port 8742 from previous crashes
-            Command::new("sh")
-                .arg("-c")
-                .arg("fuser -k 8742/tcp 2>/dev/null; exit 0")
-                .status()
-                .ok();
-
-            let child = Command::new(&python)
-                .arg(&script)
-                .arg("8742")
-                .spawn()
-                .expect("Failed to start Python API server");
-
-            app.manage(ApiProcess(Mutex::new(Some(child))));
-            std::thread::sleep(std::time::Duration::from_secs(2));
             Ok(())
         })
         .on_window_event(|window, event| {
