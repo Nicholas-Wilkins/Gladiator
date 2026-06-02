@@ -50,9 +50,11 @@ jobs:
         working-directory: gui/src-tauri
 
       - name: List build output
+        shell: bash
         run: ls -la gui/src-tauri/target/release/ 2>/dev/null || echo "No target/release directory"
 
       - name: List bundle output
+        shell: bash
         run: find gui/src-tauri/target/release/bundle -type f 2>/dev/null || echo "No bundle files found"
 
       - name: Upload artifacts
