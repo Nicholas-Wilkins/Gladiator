@@ -20,6 +20,9 @@
     "windows": {
       "wix": {},
       "nsis": {}
+    },
+    "linux": {
+      "appimage": {}
     }
   },
   "app": {
@@ -34,7 +37,16 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; connect-src 'self' http://127.0.0.1:8742 ws://127.0.0.1:8742; style-src 'self' 'unsafe-inline'; font-src 'self' data:"
+      "csp": "default-src 'self'; connect-src 'self' http://127.0.0.1:8742 ws://127.0.0.1:8742 https://github.com https://objects.githubusercontent.com; style-src 'self' 'unsafe-inline'; font-src 'self' data:"
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "REPLACE_ME_WITH_YOUR_PUBLIC_KEY",
+      "endpoints": [
+        "https://github.com/Nicholas-Wilkins/Gladiator/releases/latest/download/latest.json"
+      ],
+      "dialog": true
     }
   }
 }
