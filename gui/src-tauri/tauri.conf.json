@@ -22,7 +22,12 @@
       "nsis": {}
     },
     "linux": {
-      "appimage": {}
+      "appimage": {},
+      "deb": {}
+    },
+    "macOS": {
+      "dmg": {},
+      "minimumSystemVersion": "10.15"
     }
   },
   "app": {
