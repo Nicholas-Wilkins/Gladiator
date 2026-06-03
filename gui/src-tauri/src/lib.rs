@@ -227,9 +227,15 @@ fn can_import(python: &PathBuf, module: &str) -> bool {
 }
 
 fn is_backend_installed(dir: &PathBuf) -> bool {
-    let installed = dir.join(".installed").exists();
-    if !installed {
+    let installed = dir.join(".installed");
+    if !installed.exists() {
         return false;
+    }
+    // Reinstall if the app version changed (e.g. after an update)
+    if let Ok(stored) = std::fs::read_to_string(&installed) {
+        if stored.trim() != env!("CARGO_PKG_VERSION") {
+            return false;
+        }
     }
     let py = venv_python(&dir.join(".venv"));
     if !py.exists() {
@@ -473,7 +479,7 @@ fn install_backend(dir: &PathBuf, app: &tauri::AppHandle) -> bool {
         }
     }
 
-    if std::fs::write(dir.join(".installed"), "").is_err() {
+    if std::fs::write(dir.join(".installed"), env!("CARGO_PKG_VERSION")).is_err() {
         update_status(app, "error", "Failed to create installation marker.", 0);
         return false;
     }
