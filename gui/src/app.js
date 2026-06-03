@@ -129,6 +129,14 @@ $$(".nav-btn").forEach(btn => {
     if (currentPage === "dashboard") refreshDashboard();
     if (currentPage === "training") refreshTrainingSessions();
     if (currentPage === "champion") refreshChampion();
+    if (currentPage === "play") {
+      if (!_playGameId) {
+        $("#play-no-bot").style.display = "block";
+        $("#play-game-area").style.display = "none";
+        $("#play-bot-list").style.display = "none";
+        $("#play-bot-info").style.display = "none";
+      }
+    }
   });
 });
 
@@ -318,25 +326,66 @@ async function updatePromoteButton() {
 }
 
 // ---------------------------------------------------------------------------
-// Champion page
+// Champion page — aggregates across all worker DBs for the selected engine
 // ---------------------------------------------------------------------------
 
+let _bestExportDb = null;
+
 $("#ch-refresh").addEventListener("click", refreshChampion);
+$("#ch-engine").addEventListener("change", refreshChampion);
 
 async function refreshChampion() {
   const engine = $("#ch-engine").value;
-  const cfg = { cpu: "gladiator.db", nn: "gladiator_nn.db", mini: "gladiator_mini.db", "nn-mini": "gladiator_nn_mini.db" };
-  const db = cfg[engine];
+  const enginePrefix = `gladiator_${engine === "nn-mini" ? "nn_mini" : engine}`;
 
-  const [championRes, lineageRes, statsRes] = await Promise.all([
-    api("GET", `/api/dbs/${db}/champion`),
-    api("GET", `/api/dbs/${db}/lineage`),
-    api("GET", `/api/dbs/${db}/stats`),
-  ]);
+  const dbsRes = await api("GET", "/api/dbs");
+  const dbs = (dbsRes.dbs || []).filter(d => d.name.startsWith(enginePrefix));
 
-  renderChampionCard(championRes.champion);
-  renderLineage(lineageRes.lineage || []);
-  renderMatchStats(statsRes.matches || []);
+  if (!dbs.length) {
+    renderChampionCard(null);
+    renderLineage([]);
+    renderMatchStats([]);
+    _bestExportDb = null;
+    return;
+  }
+
+  const results = await Promise.all(
+    dbs.map(d =>
+      Promise.all([
+        api("GET", `/api/dbs/${d.name}/champion`),
+        api("GET", `/api/dbs/${d.name}/lineage`),
+        api("GET", `/api/dbs/${d.name}/stats`),
+      ]).then(([c, l, s]) => ({
+        db: d.name,
+        champion: c.champion,
+        lineage: l.lineage || [],
+        matches: s.matches || [],
+      }))
+    )
+  );
+
+  let bestChamp = null;
+  let bestDb = null;
+  let allMatches = [];
+
+  for (const r of results) {
+    if (r.champion) {
+      const streak = r.champion.consecutive_wins || 0;
+      if (!bestChamp || streak > (bestChamp.consecutive_wins || 0)) {
+        bestChamp = r.champion;
+        bestDb = r.db;
+      }
+    }
+    allMatches = allMatches.concat(r.matches);
+  }
+
+  allMatches.sort((a, b) => ((b.generation || 0) - (a.generation || 0)));
+
+  renderChampionCard(bestChamp);
+  renderLineage(results.find(r => r.db === bestDb)?.lineage || []);
+  renderMatchStats(allMatches);
+
+  _bestExportDb = bestDb;
 }
 
 function renderChampionCard(champion) {
@@ -388,13 +437,23 @@ function renderMatchStats(matches) {
   el.innerHTML = html;
 }
 
-// Export
+async function _exportFromBest(engine, output) {
+  if (!_bestExportDb) {
+    toast("No champion data to export.", "error");
+    return null;
+  }
+  const body = { engine, db: _bestExportDb };
+  if (output) body.output = output;
+  const result = await api("POST", "/api/bots/export", body);
+  return result;
+}
+
+// Export (auto-selects best champion across all workers)
 $("#ch-export").addEventListener("click", async () => {
   const engine = $("#ch-engine").value;
-  const cfg = { cpu: "gladiator.db", nn: "gladiator_nn.db", mini: "gladiator_mini.db", "nn-mini": "gladiator_nn_mini.db" };
-  const db = cfg[engine];
-  const result = await api("POST", "/api/bots/export", { engine, db });
+  const result = await _exportFromBest(engine);
   const out = $("#champion-output");
+  if (!result) return;
   if (result.error) {
     out.textContent = `Error: ${result.error}`;
     toast("Export failed", "error");
@@ -404,12 +463,38 @@ $("#ch-export").addEventListener("click", async () => {
   }
 });
 
+// Export As
+$("#ch-export-as").addEventListener("click", () => {
+  const row = $("#ch-export-as-row");
+  const pathInput = $("#ch-export-path");
+  pathInput.value = "";
+  pathInput.placeholder = "Output path (default: auto-generated name in exported_bots/)";
+  row.style.display = row.style.display === "none" ? "block" : "none";
+  if (row.style.display === "block") pathInput.focus();
+});
+
+$("#ch-export-as-confirm").addEventListener("click", async () => {
+  const engine = $("#ch-engine").value;
+  const path = $("#ch-export-path").value.trim();
+  const result = await _exportFromBest(engine, path || undefined);
+  const out = $("#champion-output");
+  if (!result) return;
+  if (result.error) {
+    out.textContent = `Error: ${result.error}`;
+    toast("Export failed", "error");
+  } else {
+    out.textContent = `Exported: ${result.output}\n${result.stderr || ""}`;
+    toast("Bot exported successfully", "success");
+    $("#ch-export-as-row").style.display = "none";
+  }
+});
+
 // Promote
 $("#ch-promote").addEventListener("click", async () => {
   if (!confirm("Promote the current champion to MUTATION mode? This will set mode=MUTATION in the database.")) return;
   const engine = $("#ch-engine").value;
-  const cfg = { cpu: "gladiator.db", nn: "gladiator_nn.db", mini: "gladiator_mini.db", "nn-mini": "gladiator_nn_mini.db" };
-  const db = cfg[engine];
+  const db = _bestExportDb;
+  if (!db) { toast("No champion data to promote.", "error"); return; }
   const result = await api("POST", "/api/bots/promote", { engine, db });
   const out = $("#champion-output");
   if (result.error) {
@@ -421,6 +506,453 @@ $("#ch-promote").addEventListener("click", async () => {
     refreshChampion();
   }
 });
+
+// ---------------------------------------------------------------------------
+// Play tab — interactive chess against exported bots
+// ---------------------------------------------------------------------------
+
+let _playGameId = null;
+let _playBoardState = null;
+let _selectedSq = null;
+let _playLocked = false;
+let _snapshotBeforeMove = null;
+let _isDragging = false;
+let _dragFromSq = null;
+
+$("#play-choose-btn").addEventListener("click", showPlayBotList);
+$("#play-change-bot").addEventListener("click", showPlayBotList);
+$("#play-new-bot").addEventListener("click", showPlayBotList);
+$("#play-reset").addEventListener("click", resetPlayGame);
+$("#play-color").addEventListener("change", () => { if (_playGameId) resetPlayGame(); });
+$("#play-difficulty").addEventListener("change", () => { if (_playGameId) resetPlayGame(); });
+
+async function showPlayBotList() {
+  _playGameId = null;
+  _playBoardState = null;
+  _selectedSq = null;
+  _playLocked = false;
+  $("#play-no-bot").style.display = "none";
+  $("#play-game-area").style.display = "none";
+  $("#play-bot-info").style.display = "none";
+  $("#play-bot-list").style.display = "block";
+  $("#play-bot-items").innerHTML = '<p class="empty-state">Loading...</p>';
+  $("#play-no-bots-msg").style.display = "none";
+
+  const res = await api("GET", "/api/play/bots");
+  const bots = res.bots || [];
+  const container = $("#play-bot-items");
+  if (!bots.length) {
+    container.innerHTML = "";
+    $("#play-no-bots-msg").style.display = "block";
+    return;
+  }
+  container.innerHTML = bots.map(b =>
+    `<button class="play-bot-item" data-path="${res.bots_dir}/${b}">${escapeHtml(b)}</button>`
+  ).join("");
+  container.querySelectorAll(".play-bot-item").forEach(btn => {
+    btn.addEventListener("click", () => startPlayGame(btn.dataset.path));
+  });
+}
+
+async function startPlayGame(botPath) {
+  const color = $("#play-color").value;
+  const difficulty = $("#play-difficulty").value;
+
+  const res = await api("POST", "/api/play/start", {
+    bot_path: botPath,
+    player_color: color,
+    difficulty: difficulty,
+  });
+
+  if (res.error) {
+    toast(`Error: ${res.error}`, "error");
+    return;
+  }
+
+  _playGameId = res.game_id;
+  _playBoardState = res.board;
+  _selectedSq = null;
+  _playLocked = false;
+
+  const botName = res.engine_name || botPath.split("/").pop() || botPath;
+  $("#play-bot-name").textContent = botName;
+  $("#play-bot-info").style.display = "flex";
+  $("#play-bot-list").style.display = "none";
+  $("#play-game-area").style.display = "flex";
+  $("#play-no-bot").style.display = "none";
+
+  renderPlayBoard();
+  updatePlayStatus();
+}
+
+function renderPlayBoard() {
+  const el = $("#play-board");
+  if (!_playBoardState || !_playBoardState.rows) {
+    el.innerHTML = "";
+    return;
+  }
+
+  const rows = _playBoardState.rows;
+  const playerColor = $("#play-color").value;
+  const isFlipped = playerColor === "black";
+  const legalMoves = _playBoardState.legal_moves || [];
+
+  let legalDests = [];
+  if (_selectedSq !== null) {
+    const fromName = chess.sqName(_selectedSq);
+    legalDests = legalMoves
+      .filter(m => m.startsWith(fromName))
+      .map(m => {
+        const toName = m.slice(2, 4);
+        const f = "abcdefgh".indexOf(toName[0]);
+        const r = parseInt(toName[1]) - 1;
+        return r * 8 + f;
+      });
+  }
+
+  const rankOrder = isFlipped ? [7,6,5,4,3,2,1,0] : [0,1,2,3,4,5,6,7];
+  const fileOrder = isFlipped ? [7,6,5,4,3,2,1,0] : [0,1,2,3,4,5,6,7];
+
+  el.style.gridTemplateColumns = "24px repeat(8, 48px)";
+  el.style.gridTemplateRows = "repeat(8, 48px) 24px";
+
+  let html = "";
+
+  for (const ri of rankOrder) {
+    const rankNum = 8 - ri;
+    html += `<div class="sq-label rank-label">${rankNum}</div>`;
+
+    for (const fi of fileOrder) {
+      const cell = rows[ri][fi];
+      const sq = cell.sq;
+      const piece = cell.piece;
+      const dark = (ri + fi) % 2 === 1;
+      const isSelected = _selectedSq === sq;
+      const isLegal = legalDests.includes(sq);
+      const isLastMove = _playBoardState.last_move_sq === sq;
+
+      let cls = "sq";
+      if (dark) cls += " sd";
+      else cls += " sl";
+      if (isSelected) cls += " selected";
+      if (isLegal) cls += " legal";
+      if (isLastMove) cls += " last-move";
+
+      const pieceHtml = piece ? (() => {
+        const pt = {'♟':'pawn','♞':'knight','♝':'bishop','♜':'rook','♛':'queen','♚':'king'}[piece.symbol] || '';
+        const extra = pt ? ` piece-${pt}` : '';
+        return `<span class="piece-${piece.color}${extra}">${escapeHtml(piece.symbol)}</span>`;
+      })() : "";
+      html += `<div class="${cls}" data-sq="${sq}">${pieceHtml}</div>`;
+    }
+  }
+
+  html += `<div class="sq-label corner-label"></div>`;
+  for (const fi of fileOrder) {
+    const letter = "abcdefgh"[fi];
+    html += `<div class="sq-label file-label">${letter}</div>`;
+  }
+
+  el.innerHTML = html;
+
+  el.querySelectorAll(".sq").forEach(sqEl => {
+    sqEl.addEventListener("click", () => handlePlaySquareClick(parseInt(sqEl.dataset.sq)));
+    sqEl.addEventListener("mousedown", (e) => handleSqMouseDown(e, parseInt(sqEl.dataset.sq)));
+  });
+}
+
+function handleSqMouseDown(e, sq) {
+  if (_playLocked || !_playBoardState || _playBoardState.is_game_over) return;
+  const piece = _playBoardState.rows.flat().find(c => c.sq === sq)?.piece;
+  if (!piece) return;
+  const playerColor = $("#play-color").value;
+  const isPlayerTurn = (playerColor === "white" && _playBoardState.turn === "white") ||
+                       (playerColor === "black" && _playBoardState.turn === "black");
+  if (piece.color !== playerColor || !isPlayerTurn) return;
+  _selectedSq = null;
+  _dragFromSq = sq;
+  _isDragging = false;
+  document.body.classList.add("dragging-piece");
+  const ghost = document.createElement("span");
+  ghost.className = `piece-${piece.color} drag-ghost`;
+  ghost.textContent = piece.symbol;
+  ghost.style.left = e.clientX + "px";
+  ghost.style.top = e.clientY + "px";
+  document.body.appendChild(ghost);
+}
+
+function handleDocMouseMove(e) {
+  if (_dragFromSq === null) return;
+  _isDragging = true;
+  const ghost = document.querySelector(".drag-ghost");
+  if (ghost) {
+    ghost.style.left = e.clientX + "px";
+    ghost.style.top = e.clientY + "px";
+  }
+}
+
+function handleDocMouseUp(e) {
+  const ghost = document.querySelector(".drag-ghost");
+  if (ghost) ghost.remove();
+  if (_dragFromSq === null) { document.body.classList.remove("dragging-piece"); return; }
+  const fromSq = _dragFromSq;
+  _dragFromSq = null;
+  document.body.classList.remove("dragging-piece");
+  if (!_isDragging) return;
+  _isDragging = false;
+  const el = document.elementFromPoint(e.clientX, e.clientY);
+  if (!el) return;
+  const sqEl = el.closest(".sq");
+  if (!sqEl) return;
+  const toSq = parseInt(sqEl.dataset.sq);
+  if (isNaN(toSq) || fromSq === toSq) return;
+  tryMakeMove(fromSq, toSq);
+}
+
+function applyMoveLocally(board, fromSq, toSq, promoUci) {
+  const newRows = board.rows.map(row => row.map(cell =>
+    ({...cell, piece: cell.piece ? {...cell.piece} : null})
+  ));
+  let fromCell, toCell;
+  for (let r = 0; r < 8; r++) {
+    for (let f = 0; f < 8; f++) {
+      if (newRows[r][f].sq === fromSq) fromCell = newRows[r][f];
+      if (newRows[r][f].sq === toSq) toCell = newRows[r][f];
+    }
+  }
+  if (!fromCell || !fromCell.piece) return false;
+
+  const movingPiece = fromCell.piece;
+  const capturedPiece = toCell.piece;
+  const symToType = {'♟':'p','♞':'n','♝':'b','♜':'r','♛':'q','♚':'k'};
+  const movingType = symToType[movingPiece.symbol] || '?';
+
+  if (promoUci && promoUci.length === 5 && movingType === 'p') {
+    const promoSymbols = {'q':'♛','r':'♜','b':'♝','n':'♞'};
+    toCell.piece = { symbol: promoSymbols[promoUci[4]] || '♛', color: movingPiece.color };
+  } else {
+    toCell.piece = movingPiece;
+  }
+  fromCell.piece = null;
+
+  if (movingType === 'k' && Math.abs(toSq - fromSq) === 2) {
+    const isKingside = toSq > fromSq;
+    const rookFrom = isKingside ? fromSq + 3 : fromSq - 4;
+    const rookTo = isKingside ? fromSq + 1 : fromSq - 1;
+    for (let r = 0; r < 8; r++) {
+      for (let f = 0; f < 8; f++) {
+        if (newRows[r][f].sq === rookFrom) {
+          const rook = newRows[r][f].piece;
+          for (let r2 = 0; r2 < 8; r2++) {
+            for (let f2 = 0; f2 < 8; f2++) {
+              if (newRows[r2][f2].sq === rookTo) {
+                newRows[r2][f2].piece = rook;
+                newRows[r][f].piece = null;
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  if (movingType === 'p' && !capturedPiece && Math.abs(toSq - fromSq) % 8 !== 0) {
+    const capturedRank = movingPiece.color === 'white' ? Math.floor(toSq / 8) - 1 : Math.floor(toSq / 8) + 1;
+    const capturedSq = capturedRank * 8 + (toSq % 8);
+    for (let r = 0; r < 8; r++) {
+      for (let f = 0; f < 8; f++) {
+        if (newRows[r][f].sq === capturedSq) newRows[r][f].piece = null;
+      }
+    }
+  }
+
+  board.rows = newRows;
+  board.turn = board.turn === 'white' ? 'black' : 'white';
+  board.legal_moves = [];
+  board.last_move_sq = toSq;
+  return true;
+}
+
+function tryMakeMove(fromSq, toSq) {
+  if (_playLocked || !_playBoardState || _playBoardState.is_game_over) return;
+
+  const playerColor = $("#play-color").value;
+  const board = _playBoardState;
+  const isPlayerTurn = (playerColor === "white" && board.turn === "white") ||
+                       (playerColor === "black" && board.turn === "black");
+  if (!isPlayerTurn) {
+    toast("Wait for the bot to move", "info");
+    return;
+  }
+
+  const fromName = chess.sqName(fromSq);
+  const toName = chess.sqName(toSq);
+  const uci = fromName + toName;
+  let moveUci = uci;
+  const legalMoves = board.legal_moves || [];
+
+  if (!legalMoves.includes(moveUci)) {
+    const promoUci = uci + "q";
+    if (legalMoves.includes(promoUci)) {
+      moveUci = promoUci;
+    } else {
+      toast("Illegal move", "error");
+      renderPlayBoard();
+      return;
+    }
+  }
+
+  _snapshotBeforeMove = JSON.parse(JSON.stringify(_playBoardState));
+  applyMoveLocally(board, fromSq, toSq, moveUci);
+  _selectedSq = null;
+  _playLocked = true;
+  renderPlayBoard();
+  updatePlayStatus();
+  makePlayMove(moveUci);
+}
+
+function handlePlaySquareClick(sq) {
+  if (_playLocked || _isDragging || !_playBoardState) return;
+  _isDragging = false;
+  const board = _playBoardState;
+  if (board.is_game_over) return;
+
+  const playerColor = $("#play-color").value;
+  const isPlayerTurn = (playerColor === "white" && board.turn === "white") ||
+                       (playerColor === "black" && board.turn === "black");
+  if (!isPlayerTurn) {
+    toast("Wait for the bot to move", "info");
+    return;
+  }
+
+  let clickedPiece = null;
+  for (let r = 0; r < 8; r++) {
+    for (let f = 0; f < 8; f++) {
+      if (board.rows[r][f].sq === sq && board.rows[r][f].piece) {
+        clickedPiece = board.rows[r][f].piece;
+      }
+    }
+  }
+
+  if (_selectedSq === null) {
+    if (clickedPiece && clickedPiece.color === playerColor) {
+      _selectedSq = sq;
+      renderPlayBoard();
+    }
+    return;
+  }
+
+  const fromSq = _selectedSq;
+  _selectedSq = null;
+
+  if (clickedPiece && clickedPiece.color === playerColor && sq !== fromSq) {
+    _selectedSq = sq;
+    renderPlayBoard();
+    return;
+  }
+
+  tryMakeMove(fromSq, sq);
+}
+
+async function makePlayMove(moveUci) {
+  _playLocked = true;
+  updatePlayStatus();
+  const res = await api("POST", `/api/play/${_playGameId}/move`, { move: moveUci });
+
+  if (res.error) {
+    toast(`Error: ${res.error}`, "error");
+    _playLocked = false;
+    return;
+  }
+
+  _playBoardState = res.board;
+  renderPlayBoard();
+  updatePlayStatus();
+
+  if (res.game_over) {
+    const result = res.result;
+    let msg = "Game Over — ";
+    if (result === "1-0") msg += "White wins!";
+    else if (result === "0-1") msg += "Black wins!";
+    else msg += "Draw!";
+    toast(msg, "info");
+    _playLocked = false;
+    return;
+  }
+
+  if (res.bot_move) {
+    setTimeout(() => {
+      _playLocked = false;
+      updatePlayStatus();
+    }, 300);
+  } else {
+    _playLocked = false;
+    updatePlayStatus();
+  }
+}
+
+function updatePlayStatus() {
+  const el = $("#play-status");
+  if (!_playBoardState) {
+    el.textContent = "Select a bot to begin";
+    return;
+  }
+  if (_playLocked) {
+    el.textContent = "Bot is thinking\u2026";
+    return;
+  }
+  if (_playBoardState.is_game_over) {
+    const r = _playBoardState.result;
+    if (r === "1-0") el.textContent = "Game Over — White wins!";
+    else if (r === "0-1") el.textContent = "Game Over — Black wins!";
+    else el.textContent = "Game Over — Draw!";
+    return;
+  }
+  const turn = _playBoardState.turn;
+  const playerColor = $("#play-color").value;
+  const isPlayerTurn = playerColor === turn;
+  if (isPlayerTurn) {
+    el.textContent = "Your turn";
+  } else {
+    el.textContent = "Bot is thinking\u2026";
+  }
+}
+
+async function resetPlayGame() {
+  if (!_playGameId) return;
+  const color = $("#play-color").value;
+  const difficulty = $("#play-difficulty").value;
+
+  const res = await api("POST", `/api/play/${_playGameId}/reset`, {
+    player_color: color,
+    difficulty: difficulty,
+  });
+
+  if (res.error) {
+    toast(`Error: ${res.error}`, "error");
+    return;
+  }
+
+  _playBoardState = res.board;
+  _selectedSq = null;
+  _playLocked = false;
+  renderPlayBoard();
+  updatePlayStatus();
+}
+
+// Simple chess utilities (subset of python-chess API for coordinate conversion)
+const chess = {
+  FILE_NAMES: "abcdefgh",
+  sqName(sq) {
+    const f = sq % 8;
+    const r = Math.floor(sq / 8);
+    return this.FILE_NAMES[f] + (r + 1);
+  },
+};
+
+// Mouse-based drag-and-drop (avoids HTML5 DnD no-drop cursor)
+document.addEventListener("mousemove", handleDocMouseMove);
+document.addEventListener("mouseup", handleDocMouseUp);
 
 // ---------------------------------------------------------------------------
 // Auto-refresh dashboard

@@ -99,6 +99,8 @@ fn start_dev_server(app_handle: &tauri::AppHandle) {
         .expect("Failed to start Python API server");
 
     *app_handle.state::<ApiProcess>().0.lock().unwrap() = Some(child);
+
+    update_status(app_handle, "ready", "Ready!", 100);
 }
 
 // ── Production mode (used in release builds) ────────────────────
@@ -172,20 +174,29 @@ fn python_stdlib_ok(python: &PathBuf) -> bool {
         .unwrap_or(false)
 }
 
-fn python_name() -> &'static str {
+fn python_name() -> String {
     if cfg!(target_os = "windows") {
-        "python"
+        // On Windows, try py launcher first (not affected by App Execution Aliases
+        // that redirect `python` to the Microsoft Store).
+        let candidates = ["py", "python", "python3"];
+        for name in &candidates {
+            let p = PathBuf::from(name);
+            if python_stdlib_ok(&p) {
+                return name.to_string();
+            }
+        }
+        "python".to_string()
     } else {
         let py3 = PathBuf::from("python3");
         if python_stdlib_ok(&py3) {
-            return "python3";
+            return "python3".to_string();
         }
         let py = PathBuf::from("python");
         if python_stdlib_ok(&py) {
-            return "python";
+            return "python".to_string();
         }
         // Neither works — return a guess; caller must verify with python_stdlib_ok
-        "python3"
+        "python3".to_string()
     }
 }
 
@@ -356,7 +367,26 @@ fn install_backend(dir: &PathBuf, app: &tauri::AppHandle) -> bool {
 
     update_status(app, "venv", "Setting up Python environment\u{2026}", 30);
     let venv_dir = dir.join(".venv");
-    let mut venv_cmd = Command::new(python_name());
+    let py_name = python_name();
+    let py_path = PathBuf::from(&py_name);
+    if !python_stdlib_ok(&py_path) {
+        let msg = if cfg!(target_os = "windows") {
+            format!(
+                "Python was not found. Make sure Python 3 is installed from python.org.\n\
+                 Tried: '{}', 'py', 'python', 'python3'",
+                py_name
+            )
+        } else {
+            format!(
+                "Python was not found. Make sure python3 is installed and on the PATH.\n\
+                 Tried: '{}', 'python3', 'python'",
+                py_name
+            )
+        };
+        update_status(app, "error", &msg, 0);
+        return false;
+    }
+    let mut venv_cmd = Command::new(&py_name);
     venv_cmd.args(["-m", "venv", &venv_dir.to_string_lossy()]);
     venv_cmd.env_remove("PYTHONHOME");
     match venv_cmd.output() {
@@ -373,8 +403,7 @@ fn install_backend(dir: &PathBuf, app: &tauri::AppHandle) -> bool {
         Err(e) => {
             let msg = format!(
                 "Failed to run Python ({}): {}\nMake sure python3 or python is installed.",
-                python_name(),
-                e
+                py_name, e
             );
             update_status(app, "error", &msg, 0);
             return false;

@@ -33,6 +33,9 @@
       <button class="nav-btn" data-page="champion">
         <span class="nav-icon">&#9733;</span> Champions
       </button>
+      <button class="nav-btn" data-page="play">
+        <span class="nav-icon">&#9823;</span> Play
+      </button>
     </nav>
     <div class="sidebar-status">
       <span id="conn-status" class="status-dot offline"></span>
@@ -118,9 +121,67 @@
       </section>
       <div class="form-actions">
         <button id="ch-export" class="btn">Export Bot</button>
+        <button id="ch-export-as" class="btn">Export Bot As</button>
         <button id="ch-promote" class="btn secondary">Promote to Mutation</button>
       </div>
+      <div id="ch-export-as-row" style="display:none;margin-bottom:8px">
+        <div class="form-row">
+          <input type="text" id="ch-export-path" placeholder="Output path (default: auto-generated name in exported_bots/)">
+          <button id="ch-export-as-confirm" class="btn primary">Export</button>
+        </div>
+      </div>
       <div id="champion-output" class="log-area"></div>
+    </section>
+
+    <!-- Play -->
+    <section id="page-play" class="page">
+      <header>
+        <h2>Play</h2>
+        <div id="play-bot-info" style="display:none">
+          <span id="play-bot-name"></span>
+          <button id="play-change-bot" class="btn" style="font-size:12px;padding:2px 8px">Change Opponent</button>
+        </div>
+      </header>
+
+      <div id="play-no-bot" class="play-choose-container">
+        <div class="play-choose-icon">&#9823;</div>
+        <p>Choose an opponent to play against</p>
+        <button id="play-choose-btn" class="btn primary">Choose Opponent</button>
+      </div>
+
+      <div id="play-bot-list" style="display:none" class="section-card">
+        <h3>Available Bots</h3>
+        <div id="play-bot-items"></div>
+        <p id="play-no-bots-msg" class="empty-state" style="display:none">No exported bots found. Export one from the Champions tab first.</p>
+      </div>
+
+      <div id="play-game-area" style="display:none">
+        <div id="play-board-container">
+          <div id="play-board" class="play-board"></div>
+        </div>
+        <div id="play-sidebar">
+          <div class="form-row">
+            <label for="play-color">Play as</label>
+            <select id="play-color">
+              <option value="white">White</option>
+              <option value="black">Black</option>
+            </select>
+          </div>
+          <div class="form-row">
+            <label for="play-difficulty">Time to think</label>
+            <select id="play-difficulty">
+              <option value="high">High</option>
+              <option value="medium" selected>Medium</option>
+              <option value="low">Low</option>
+            </select>
+          </div>
+          <div class="form-actions" style="flex-direction:column;gap:6px">
+            <button id="play-reset" class="btn secondary" style="width:100%">Reset Game</button>
+            <button id="play-new-bot" class="btn" style="width:100%">New Opponent</button>
+          </div>
+          <div id="play-status" class="play-status">Select a bot to begin</div>
+        </div>
+      </div>
     </section>
   </main>
 </div>

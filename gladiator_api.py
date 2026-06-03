@@ -61,9 +61,9 @@ ws_lock = asyncio.Lock()
 
 
 _PIECE_SYMBOLS = {
-    (chess.PAWN, chess.WHITE): "♙", (chess.KNIGHT, chess.WHITE): "♘",
-    (chess.BISHOP, chess.WHITE): "♗", (chess.ROOK, chess.WHITE): "♖",
-    (chess.QUEEN, chess.WHITE): "♕", (chess.KING, chess.WHITE): "♔",
+    (chess.PAWN, chess.WHITE): "♟", (chess.KNIGHT, chess.WHITE): "♞",
+    (chess.BISHOP, chess.WHITE): "♝", (chess.ROOK, chess.WHITE): "♜",
+    (chess.QUEEN, chess.WHITE): "♛", (chess.KING, chess.WHITE): "♚",
     (chess.PAWN, chess.BLACK): "♟", (chess.KNIGHT, chess.BLACK): "♞",
     (chess.BISHOP, chess.BLACK): "♝", (chess.ROOK, chess.BLACK): "♜",
     (chess.QUEEN, chess.BLACK): "♛", (chess.KING, chess.BLACK): "♚",
@@ -236,15 +236,15 @@ async def create_session(body: dict):
 
     main_db_path = _resolve_db(cfg["default_db"])
 
+    existing = sorted(SCRIPT_DIR.glob(f"gladiator_{engine}_worker_*.db"))
+    next_idx = len(existing)
+
     for i in range(num_workers):
-        if num_workers > 1:
-            worker_db_name = f"gladiator_{engine}_worker_{i}.db"
-            worker_db_path = _resolve_db(worker_db_name)
-            if not worker_db_path.exists() and main_db_path.exists():
-                shutil.copy2(str(main_db_path), str(worker_db_path))
-        else:
-            worker_db_name = cfg["default_db"]
-        db_path = str(_resolve_db(worker_db_name))
+        worker_db_name = f"gladiator_{engine}_worker_{next_idx + i}.db"
+        worker_db_path = _resolve_db(worker_db_name)
+        if not worker_db_path.exists() and main_db_path.exists():
+            shutil.copy2(str(main_db_path), str(worker_db_path))
+        db_path = str(worker_db_path)
 
         worker_seed = (seed or 0) + i if seed is not None else None
 
@@ -265,10 +265,10 @@ async def create_session(body: dict):
                 "created_at": time.time(),
                 "seed": worker_seed,
                 "max_games": max_games,
-                "worker_id": i if num_workers > 1 else None,
+                "worker_id": (next_idx + i) if num_workers > 1 else None,
             }
 
-        created.append({"session_id": sid, "pid": proc.pid, "db": worker_db_name, "worker": i})
+        created.append({"session_id": sid, "pid": proc.pid, "db": worker_db_name, "worker": (next_idx + i) if num_workers > 1 else None})
 
     await _broadcast_refresh()
 
@@ -553,9 +553,332 @@ async def _monitor():
                     if proc.poll() is not None:
                         if time.time() - s["created_at"] > 5:
                             del sessions[sid]
+            async with play_lock:
+                for gid, g in list(play_games.items()):
+                    proc = g["process"]
+                    if proc.returncode is not None:
+                        del play_games[gid]
             await _broadcast_refresh()
         except asyncio.CancelledError:
             break
+
+
+# ---------------------------------------------------------------------------
+# Play — play chess against exported bots
+# ---------------------------------------------------------------------------
+
+play_games: dict[str, dict] = {}
+play_lock = asyncio.Lock()
+
+_DEPTH_MAP = {"low": 2, "medium": 3, "high": 5}
+
+
+async def _uci_read_line(proc: asyncio.subprocess.Process, timeout: float = 10.0) -> str:
+    try:
+        line = await asyncio.wait_for(proc.stdout.readline(), timeout=timeout)
+        return line.decode().strip()
+    except (asyncio.TimeoutError, Exception):
+        return ""
+
+
+async def _uci_read_until(proc: asyncio.subprocess.Process, prefix: str, timeout: float = 10.0) -> str:
+    while True:
+        line = await _uci_read_line(proc, timeout=timeout)
+        if not line:
+            return ""
+        if line.startswith(prefix):
+            return line
+
+
+async def _uci_read_bestmove(proc: asyncio.subprocess.Process, timeout: float = 60.0) -> str | None:
+    while True:
+        line = await _uci_read_line(proc, timeout=timeout)
+        if not line:
+            return None
+        if line.startswith("bestmove "):
+            parts = line.split()
+            if len(parts) >= 2 and parts[1] != "(none)":
+                return parts[1]
+
+
+async def _uci_send(proc: asyncio.subprocess.Process, cmd: str):
+    proc.stdin.write((cmd + "\n").encode())
+    await proc.stdin.drain()
+
+
+def _play_board_to_grid(board: chess.Board) -> dict:
+    rows = []
+    for rank in range(7, -1, -1):
+        cells = []
+        for file in range(8):
+            sq = chess.square(file, rank)
+            piece = board.piece_at(sq)
+            cell = {"piece": None, "sq": sq}
+            if piece:
+                cell["piece"] = {
+                    "symbol": _PIECE_SYMBOLS[(piece.piece_type, piece.color)],
+                    "color": "white" if piece.color == chess.WHITE else "black",
+                }
+            cells.append(cell)
+        rows.append(cells)
+    legal_ucis = [m.uci() for m in board.legal_moves]
+    last_move_sq = None
+    if board.move_stack:
+        last_move_sq = board.move_stack[-1].to_square
+    return {
+        "rows": rows,
+        "turn": "white" if board.turn == chess.WHITE else "black",
+        "fen": board.fen(),
+        "legal_moves": legal_ucis,
+        "is_game_over": board.is_game_over(),
+        "result": board.result() if board.is_game_over() else None,
+        "last_move_sq": last_move_sq,
+    }
+
+
+@app.get("/api/play/bots")
+async def play_list_bots():
+    bots_dir = SCRIPT_DIR / "exported_bots"
+    if not bots_dir.exists():
+        return {"bots": []}
+    bots = sorted(f.name for f in bots_dir.iterdir() if f.suffix == ".py")
+    return {"bots": bots, "bots_dir": str(bots_dir)}
+
+
+@app.post("/api/play/start")
+async def play_start(body: dict):
+    bot_path = body.get("bot_path")
+    player_color_str = body.get("player_color", "white")
+    difficulty = body.get("difficulty", "medium")
+
+    if not bot_path:
+        return {"error": "No bot path provided"}
+
+    bp = Path(bot_path)
+    if not bp.exists():
+        return {"error": f"Bot not found: {bot_path}"}
+
+    player_color = chess.WHITE if player_color_str == "white" else chess.BLACK
+    depth = _DEPTH_MAP.get(difficulty, 6)
+    python = sys.executable
+
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            python, str(bp),
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+    except Exception as e:
+        return {"error": f"Failed to launch bot: {e}"}
+
+    # UCI handshake
+    await _uci_send(proc, "uci")
+    engine_name = ""
+    handshake_ok = False
+    while True:
+        line = await _uci_read_line(proc, timeout=5.0)
+        if not line:
+            break
+        if line.startswith("id name"):
+            engine_name = line[7:].strip()
+        if line == "uciok":
+            await _uci_send(proc, "isready")
+            ready = await _uci_read_until(proc, "readyok", timeout=5.0)
+            handshake_ok = bool(ready)
+            break
+
+    if not handshake_ok:
+        ret = proc.returncode
+        stderr_txt = ""
+        if ret is not None:
+            try:
+                data = await asyncio.wait_for(proc.stderr.read(), timeout=2.0)
+                stderr_txt = data.decode().strip()
+            except Exception:
+                pass
+        msg = "Bot did not respond to UCI handshake"
+        if stderr_txt:
+            msg += f"\nBot error:\n{stderr_txt}"
+        elif ret is not None:
+            msg += f"\nBot process exited with code {ret}"
+        if ret is None:
+            proc.terminate()
+        return {"error": msg}
+
+    await _uci_send(proc, "ucinewgame")
+
+    game_id = uuid.uuid4().hex[:8]
+    board = chess.Board()
+
+    # Bot moves first if player chose black
+    if player_color == chess.BLACK:
+        await _uci_send(proc, "position startpos")
+        await _uci_send(proc, f"go depth {depth}")
+        bot_move_uci = await _uci_read_bestmove(proc, timeout=30.0)
+        if not bot_move_uci:
+            stderr_txt = ""
+            if proc.returncode is not None:
+                try:
+                    data = await asyncio.wait_for(proc.stderr.read(), timeout=2.0)
+                    stderr_txt = data.decode().strip()
+                except Exception:
+                    pass
+            msg = "Bot did not make a move"
+            if stderr_txt:
+                msg += f"\n{stderr_txt}"
+            proc.terminate()
+            return {"error": msg}
+        board.push_uci(bot_move_uci)
+
+    async with play_lock:
+        play_games[game_id] = {
+            "process": proc,
+            "board": board,
+            "player_color": player_color,
+            "depth": depth,
+            "bot_path": str(bp),
+            "engine_name": engine_name,
+            "difficulty": difficulty,
+            "created_at": time.time(),
+        }
+
+    return {
+        "game_id": game_id,
+        "board": _play_board_to_grid(board),
+        "player_color": player_color_str,
+        "engine_name": engine_name,
+        "bot_path": str(bp),
+    }
+
+
+@app.post("/api/play/{game_id}/move")
+async def play_move(game_id: str, body: dict):
+    move_uci = body.get("move")
+    if not move_uci:
+        return {"error": "No move provided"}
+
+    async with play_lock:
+        game = play_games.get(game_id)
+    if not game:
+        return {"error": "Game not found"}
+
+    proc = game["process"]
+    board = game["board"]
+    player_color = game["player_color"]
+    depth = game["depth"]
+
+    if board.is_game_over():
+        return {"error": "Game is already over"}
+
+    try:
+        move = chess.Move.from_uci(move_uci)
+    except Exception:
+        return {"error": f"Invalid UCI move: {move_uci}"}
+
+    if move not in board.legal_moves:
+        return {"error": "Illegal move"}
+
+    board.push(move)
+
+    if board.is_game_over():
+        game["board"] = board
+        return {
+            "board": _play_board_to_grid(board),
+            "game_over": True,
+            "result": board.result(),
+            "bot_move": None,
+        }
+
+    all_ucis = " ".join(m.uci() for m in board.move_stack)
+    await _uci_send(proc, f"position startpos moves {all_ucis}")
+    await _uci_send(proc, f"go depth {depth}")
+
+    bot_move_uci = await _uci_read_bestmove(proc, timeout=30.0)
+    if not bot_move_uci:
+        return {"error": "Bot did not respond with a move"}
+
+    bot_move = chess.Move.from_uci(bot_move_uci)
+    board.push(bot_move)
+
+    game_over = board.is_game_over()
+    game["board"] = board
+
+    return {
+        "board": _play_board_to_grid(board),
+        "bot_move": bot_move_uci,
+        "game_over": game_over,
+        "result": board.result() if game_over else None,
+    }
+
+
+@app.get("/api/play/{game_id}")
+async def play_status(game_id: str):
+    async with play_lock:
+        game = play_games.get(game_id)
+    if not game:
+        return {"error": "Game not found"}
+    board = game["board"]
+    return {
+        "game_id": game_id,
+        "board": _play_board_to_grid(board),
+        "player_color": "white" if game["player_color"] == chess.WHITE else "black",
+        "difficulty": game.get("difficulty", "medium"),
+        "engine_name": game.get("engine_name", ""),
+        "bot_path": game.get("bot_path", ""),
+    }
+
+
+@app.post("/api/play/{game_id}/reset")
+async def play_reset(game_id: str, body: dict):
+    player_color_str = body.get("player_color", "white")
+    difficulty = body.get("difficulty", "medium")
+
+    async with play_lock:
+        game = play_games.get(game_id)
+    if not game:
+        return {"error": "Game not found"}
+
+    proc = game["process"]
+    player_color = chess.WHITE if player_color_str == "white" else chess.BLACK
+    depth = _DEPTH_MAP.get(difficulty, 6)
+
+    await _uci_send(proc, "ucinewgame")
+
+    board = chess.Board()
+
+    if player_color == chess.BLACK:
+        await _uci_send(proc, "position startpos")
+        await _uci_send(proc, f"go depth {depth}")
+        bot_move_uci = await _uci_read_bestmove(proc, timeout=30.0)
+        if not bot_move_uci:
+            return {"error": "Bot did not make a move"}
+        board.push_uci(bot_move_uci)
+
+    game["board"] = board
+    game["player_color"] = player_color
+    game["depth"] = depth
+    game["difficulty"] = difficulty
+
+    return {
+        "board": _play_board_to_grid(board),
+        "player_color": player_color_str,
+    }
+
+
+@app.post("/api/play/{game_id}/stop")
+async def play_stop(game_id: str):
+    async with play_lock:
+        game = play_games.pop(game_id, None)
+    if not game:
+        return {"error": "Game not found"}
+    proc = game["process"]
+    try:
+        proc.terminate()
+        await asyncio.wait_for(proc.wait(), timeout=5.0)
+    except Exception:
+        proc.kill()
+    return {"status": "stopped"}
 
 
 # ---------------------------------------------------------------------------

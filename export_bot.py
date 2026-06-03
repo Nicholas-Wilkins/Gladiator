@@ -548,6 +548,14 @@ def main() -> None:
         out_path = Path(args.output)
         if out_path.is_dir():
             out_path = out_path / auto_name
+        elif out_path.parent == Path("."):
+            # Bare filename (no directory component) — save in default dir
+            out_dir = repo_root / "exported_bots"
+            out_dir.mkdir(exist_ok=True)
+            name = out_path.name
+            if not name.endswith(".py"):
+                name += ".py"
+            out_path = out_dir / name
     else:
         out_dir = repo_root / "exported_bots"
         out_dir.mkdir(exist_ok=True)
