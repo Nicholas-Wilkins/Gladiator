@@ -165,6 +165,7 @@ fn venv_pip(venv_dir: &PathBuf) -> PathBuf {
 fn python_stdlib_ok(python: &PathBuf) -> bool {
     Command::new(python)
         .args(["-c", "import encodings"])
+        .env_remove("PYTHONHOME")
         .output()
         .map(|o| o.status.success())
         .unwrap_or(false)
@@ -176,10 +177,14 @@ fn python_name() -> &'static str {
     } else {
         let py3 = PathBuf::from("python3");
         if python_stdlib_ok(&py3) {
-            "python3"
-        } else {
-            "python"
+            return "python3";
         }
+        let py = PathBuf::from("python");
+        if python_stdlib_ok(&py) {
+            return "python";
+        }
+        // Neither works — return a guess; caller must verify with python_stdlib_ok
+        "python3"
     }
 }
 
@@ -203,6 +208,7 @@ fn pip_install(venv_dir: &PathBuf, pkgs: &[&str]) -> Result<String, String> {
 fn can_import(python: &PathBuf, module: &str) -> bool {
     Command::new(python)
         .args(["-c", &format!("import {}", module)])
+        .env_remove("PYTHONHOME")
         .output()
         .map(|o| o.status.success())
         .unwrap_or(false)
@@ -300,7 +306,7 @@ fn extract_zip(zip_path: &PathBuf, dest: &PathBuf, app: &tauri::AppHandle) -> bo
     }
 }
 
-fn install_backend(dir: &PathBuf, app: &tauri::AppHandle) {
+fn install_backend(dir: &PathBuf, app: &tauri::AppHandle) -> bool {
     eprintln!("[gladiator-gui] Installing backend to {}", dir.display());
     update_status(
         app,
@@ -313,18 +319,18 @@ fn install_backend(dir: &PathBuf, app: &tauri::AppHandle) {
     if let Err(e) = std::fs::create_dir_all(dir) {
         let msg = format!("Failed to create backend directory:\n{}", e);
         update_status(app, "error", &msg, 0);
-        return;
+        return false;
     }
 
     let zip_path = dir.join("repo.zip");
     let url = "https://github.com/Nicholas-Wilkins/Gladiator/archive/refs/heads/main.zip";
     if !download_file(url, &zip_path, app) {
-        return;
+        return false;
     }
 
     update_status(app, "extracting", "Extracting files\u{2026}", 20);
     if !extract_zip(&zip_path, dir, app) {
-        return;
+        return false;
     }
 
     let extracted = dir.join("Gladiator-main");
@@ -341,7 +347,7 @@ fn install_backend(dir: &PathBuf, app: &tauri::AppHandle) {
                     e, copy_err
                 );
                 update_status(app, "error", &msg, 0);
-                return;
+                return false;
             }
         }
     }
@@ -361,7 +367,7 @@ fn install_backend(dir: &PathBuf, app: &tauri::AppHandle) {
                 stderr.trim()
             );
             update_status(app, "error", &msg, 0);
-            return;
+            return false;
         }
         Err(e) => {
             let msg = format!(
@@ -370,7 +376,7 @@ fn install_backend(dir: &PathBuf, app: &tauri::AppHandle) {
                 e
             );
             update_status(app, "error", &msg, 0);
-            return;
+            return false;
         }
     }
 
@@ -390,7 +396,7 @@ fn install_backend(dir: &PathBuf, app: &tauri::AppHandle) {
             contents
         );
         update_status(app, "error", &msg, 0);
-        return;
+        return false;
     }
 
     update_status(app, "deps", "Installing Python packages\u{2026}", 40);
@@ -404,12 +410,12 @@ fn install_backend(dir: &PathBuf, app: &tauri::AppHandle) {
             let stderr = String::from_utf8_lossy(&out.stderr);
             let msg = format!("Failed to install Python packages:\n{}", stderr.trim());
             update_status(app, "error", &msg, 0);
-            return;
+            return false;
         }
         Err(e) => {
             let msg = format!("Failed to run pip: {}", e);
             update_status(app, "error", &msg, 0);
-            return;
+            return false;
         }
     }
 
@@ -428,20 +434,21 @@ fn install_backend(dir: &PathBuf, app: &tauri::AppHandle) {
             let stderr = String::from_utf8_lossy(&out.stderr);
             let msg = format!("Failed to install PyTorch:\n{}", stderr.trim());
             update_status(app, "error", &msg, 0);
-            return;
+            return false;
         }
         Err(e) => {
             let msg = format!("Failed to run pip for PyTorch: {}", e);
             update_status(app, "error", &msg, 0);
-            return;
+            return false;
         }
     }
 
     if std::fs::write(dir.join(".installed"), "").is_err() {
         update_status(app, "error", "Failed to create installation marker.", 0);
-        return;
+        return false;
     }
     eprintln!("[gladiator-gui] Backend installation complete!");
+    true
 }
 
 fn copy_dir(src: &PathBuf, dst: &PathBuf) -> Result<(), String> {
@@ -569,10 +576,18 @@ fn start_production_server(app_handle: &tauri::AppHandle) {
                 // Try #2: system python with clean env (clear PYTHONHOME
                 // which can corrupt stdlib lookup in AppImage environments)
                 let sys_py = PathBuf::from(python_name());
-                let result = Command::new(&sys_py)
-                    .args(["-m", "pip", "install", "fastapi", "uvicorn[standard]"])
-                    .env_remove("PYTHONHOME")
-                    .output();
+                let mut pip_cmd = Command::new(&sys_py);
+                pip_cmd.args(["-m", "pip", "install", "fastapi", "uvicorn[standard]"]);
+                pip_cmd.env_remove("PYTHONHOME");
+                // When using venv python, route the install into the venv's
+                // site-packages so the server can find them.
+                if label == "venv" {
+                    if let Some(sp) = find_venv_site_packages(&venv_dir) {
+                        pip_cmd.arg("--target");
+                        pip_cmd.arg(sp.to_string_lossy().to_string());
+                    }
+                }
+                let result = pip_cmd.output();
                 match result {
                     Ok(out) if out.status.success() => {}
                     Ok(out) => {
@@ -641,7 +656,9 @@ pub fn run() {
                 std::thread::spawn(move || {
                     let dir = data_dir();
                     if !is_backend_installed(&dir) {
-                        install_backend(&dir, &handle);
+                        if !install_backend(&dir, &handle) {
+                            return;
+                        }
                     }
                     start_production_server(&handle);
                 });
