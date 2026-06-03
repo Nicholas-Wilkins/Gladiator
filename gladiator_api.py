@@ -236,28 +236,33 @@ async def create_session(body: dict):
 
     main_db_path = _resolve_db(cfg["default_db"])
 
-    existing = sorted(SCRIPT_DIR.glob(f"gladiator_{engine}_worker_*.db"))
-    next_idx = len(existing)
+    # Atomically assign worker indices that aren't in use by active sessions
+    async with sessions_lock:
+        in_use = {s["worker_id"] for s in sessions.values()
+                  if s["engine"] == engine and s.get("worker_id") is not None}
+        for i in range(num_workers):
+            idx = 0
+            while idx in in_use:
+                idx += 1
+            in_use.add(idx)
 
-    for i in range(num_workers):
-        worker_db_name = f"gladiator_{engine}_worker_{next_idx + i}.db"
-        worker_db_path = _resolve_db(worker_db_name)
-        if not worker_db_path.exists() and main_db_path.exists():
-            shutil.copy2(str(main_db_path), str(worker_db_path))
-        db_path = str(worker_db_path)
+            worker_db_name = f"gladiator_{engine}_worker_{idx}.db"
+            worker_db_path = _resolve_db(worker_db_name)
+            if not worker_db_path.exists() and main_db_path.exists():
+                shutil.copy2(str(main_db_path), str(worker_db_path))
+            db_path = str(worker_db_path)
 
-        worker_seed = (seed or 0) + i if seed is not None else None
+            worker_seed = (seed or 0) + i if seed is not None else None
 
-        cmd = [python, str(SCRIPT_DIR / cfg["main"]), "--no-ui", "--db", db_path]
-        if worker_seed is not None:
-            cmd.extend(["--seed", str(worker_seed)])
-        if max_games is not None:
-            cmd.extend(["--max-games", str(max_games)])
+            cmd = [python, str(SCRIPT_DIR / cfg["main"]), "--no-ui", "--db", db_path]
+            if worker_seed is not None:
+                cmd.extend(["--seed", str(worker_seed)])
+            if max_games is not None:
+                cmd.extend(["--max-games", str(max_games)])
 
-        proc = subprocess.Popen(cmd)
-        sid = uuid.uuid4().hex[:8]
+            proc = subprocess.Popen(cmd)
+            sid = uuid.uuid4().hex[:8]
 
-        async with sessions_lock:
             sessions[sid] = {
                 "engine": engine,
                 "db_path": db_path,
@@ -265,10 +270,10 @@ async def create_session(body: dict):
                 "created_at": time.time(),
                 "seed": worker_seed,
                 "max_games": max_games,
-                "worker_id": (next_idx + i) if num_workers > 1 else None,
+                "worker_id": idx,
             }
 
-        created.append({"session_id": sid, "pid": proc.pid, "db": worker_db_name, "worker": (next_idx + i) if num_workers > 1 else None})
+            created.append({"session_id": sid, "pid": proc.pid, "db": worker_db_name, "worker": idx})
 
     await _broadcast_refresh()
 
@@ -381,6 +386,10 @@ async def export_bot(body: dict):
         cmd.extend(["--bot-id", bot_id])
     if output:
         cmd.extend(["--output", output])
+    else:
+        default_out_dir = SCRIPT_DIR / "exported_bots"
+        default_out_dir.mkdir(exist_ok=True)
+        cmd.extend(["--output", str(default_out_dir)])
 
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:

@@ -534,7 +534,7 @@ def main() -> None:
         )
 
     # Build engine code by inlining source files
-    repo_root = Path(__file__).parent
+    repo_root = Path(__file__).parent.resolve()
     engine_code = _ENGINE_CODE_BUILDERS[args.engine](repo_root)
 
     # Build names / paths
