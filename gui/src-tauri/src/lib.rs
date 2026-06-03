@@ -1,6 +1,7 @@
 use serde::Serialize;
+use std::io::Read;
 use std::path::PathBuf;
-use std::process::{Child, Command};
+use std::process::{Child, Command, Stdio};
 use std::sync::Mutex;
 use tauri::Manager;
 
@@ -494,6 +495,7 @@ fn try_start_server(
     kill_port(8742);
     let mut cmd = Command::new(bin);
     cmd.arg(script).arg("8742");
+    cmd.stderr(Stdio::piped());
     // Preserve any user-set PYTHONPATH by appending our venv path
     if let Some(sp) = site_packages {
         let existing = std::env::var("PYTHONPATH").unwrap_or_default();
@@ -511,7 +513,16 @@ fn try_start_server(
     match child.try_wait() {
         Ok(Some(status)) => {
             let code = status.code().map(|c| c.to_string()).unwrap_or_default();
-            Err(format!("exited immediately (code {})", code))
+            let mut stderr_buf = String::new();
+            if let Some(mut stderr_pipe) = child.stderr.take() {
+                let _ = stderr_pipe.read_to_string(&mut stderr_buf);
+            }
+            let stderr = stderr_buf.trim();
+            if stderr.is_empty() {
+                Err(format!("exited immediately (code {})", code))
+            } else {
+                Err(format!("exited immediately (code {}):\n{}", code, stderr))
+            }
         }
         Ok(None) => Ok(child),
         Err(e) => Err(format!("process check failed: {}", e)),
