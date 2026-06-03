@@ -324,6 +324,30 @@ fn extract_zip(zip_path: &PathBuf, dest: &PathBuf, app: &tauri::AppHandle) -> bo
     }
 }
 
+fn preserve_user_data(src: &PathBuf, dst: &PathBuf) {
+    let _ = std::fs::create_dir_all(dst);
+    if let Ok(entries) = std::fs::read_dir(src) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().map_or(false, |e| e == "db") {
+                let _ = std::fs::copy(&path, dst.join(path.file_name().unwrap()));
+            }
+        }
+    }
+    let exported = src.join("exported_bots");
+    if exported.exists() {
+        let _ = copy_dir(&exported, &dst.join("exported_bots"));
+    }
+}
+
+fn try_restore_user_data(backup: &PathBuf, dest: &PathBuf) {
+    if backup.exists() {
+        let _ = std::fs::create_dir_all(dest);
+        preserve_user_data(backup, dest);
+        let _ = std::fs::remove_dir_all(backup);
+    }
+}
+
 fn install_backend(dir: &PathBuf, app: &tauri::AppHandle) -> bool {
     eprintln!("[gladiator-gui] Installing backend to {}", dir.display());
     update_status(
@@ -333,25 +357,40 @@ fn install_backend(dir: &PathBuf, app: &tauri::AppHandle) -> bool {
         5,
     );
 
-    let _ = std::fs::remove_dir_all(dir);
-    if let Err(e) = std::fs::create_dir_all(dir) {
-        let msg = format!("Failed to create backend directory:\n{}", e);
-        update_status(app, "error", &msg, 0);
-        return false;
+    // Back up user data to /tmp — survives a crash mid-install
+    let backup = std::env::temp_dir().join("gladiator_preserve");
+    let _ = std::fs::remove_dir_all(&backup);
+    let old_backend = dir.join("backend");
+    let had_data = old_backend.exists();
+    if had_data {
+        preserve_user_data(&old_backend, &backup);
     }
 
+    // Download the zip (don't wipe old backend until we have the new code)
     let zip_path = dir.join("repo.zip");
     let url = "https://github.com/Nicholas-Wilkins/Gladiator/archive/refs/heads/main.zip";
     if !download_file(url, &zip_path, app) {
+        try_restore_user_data(&backup, &old_backend);
         return false;
     }
 
-    update_status(app, "extracting", "Extracting files\u{2026}", 20);
-    if !extract_zip(&zip_path, dir, app) {
+    // Extract to a temp dir so the old backend stays intact until we're ready
+    let tmp_extract = dir.join(".tmp_extract");
+    let _ = std::fs::create_dir_all(&tmp_extract);
+    if !extract_zip(&zip_path, &tmp_extract, app) {
+        try_restore_user_data(&backup, &old_backend);
+        let _ = std::fs::remove_dir_all(&tmp_extract);
         return false;
     }
 
-    let extracted = dir.join("Gladiator-main");
+    // Now it's safe to wipe — we have the new code and a backup
+    let _ = std::fs::remove_dir_all(dir);
+    if std::fs::create_dir_all(dir).is_err() {
+        try_restore_user_data(&backup, &old_backend);
+        return false;
+    }
+
+    let extracted = tmp_extract.join("Gladiator-main");
     let backend = dir.join("backend");
     if let Err(e) = std::fs::rename(&extracted, &backend) {
         // rename fails across filesystem boundaries; fall back to copy+delete
@@ -360,6 +399,7 @@ fn install_backend(dir: &PathBuf, app: &tauri::AppHandle) -> bool {
                 let _ = std::fs::remove_dir_all(&extracted);
             }
             Err(copy_err) => {
+                try_restore_user_data(&backup, &backend);
                 let msg = format!(
                     "Failed to move backend files:\nrename: {}\ncopy: {}",
                     e, copy_err
@@ -370,6 +410,10 @@ fn install_backend(dir: &PathBuf, app: &tauri::AppHandle) -> bool {
         }
     }
     let _ = std::fs::remove_file(&zip_path);
+    let _ = std::fs::remove_dir_all(&tmp_extract);
+
+    // Restore user databases and exported bots into the fresh backend
+    try_restore_user_data(&backup, &backend);
 
     update_status(app, "venv", "Setting up Python environment\u{2026}", 30);
     let venv_dir = dir.join(".venv");
