@@ -52,7 +52,8 @@ fn find_python() -> String {
         return venv_python.to_string_lossy().to_string();
     }
     for name in &["python3", "python"] {
-        if Command::new(name).arg("--version").output().is_ok() {
+        let py = PathBuf::from(name);
+        if python_stdlib_ok(&py) {
             return name.to_string();
         }
     }
@@ -161,11 +162,20 @@ fn venv_pip(venv_dir: &PathBuf) -> PathBuf {
     }
 }
 
+fn python_stdlib_ok(python: &PathBuf) -> bool {
+    Command::new(python)
+        .args(["-c", "import encodings"])
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
+
 fn python_name() -> &'static str {
     if cfg!(target_os = "windows") {
         "python"
     } else {
-        if Command::new("python3").arg("--version").output().is_ok() {
+        let py3 = PathBuf::from("python3");
+        if python_stdlib_ok(&py3) {
             "python3"
         } else {
             "python"
@@ -174,9 +184,11 @@ fn python_name() -> &'static str {
 }
 
 fn pip_install(venv_dir: &PathBuf, pkgs: &[&str]) -> Result<String, String> {
-    let out = Command::new(&venv_pip(venv_dir))
-        .args(["install"])
-        .args(pkgs)
+    let mut cmd = Command::new(&venv_pip(venv_dir));
+    cmd.args(["install"]);
+    cmd.args(pkgs);
+    cmd.env_remove("PYTHONHOME");
+    let out = cmd
         .output()
         .map_err(|e| format!("Failed to run pip: {}", e))?;
     if out.status.success() {
@@ -298,7 +310,11 @@ fn install_backend(dir: &PathBuf, app: &tauri::AppHandle) {
     );
 
     let _ = std::fs::remove_dir_all(dir);
-    std::fs::create_dir_all(dir).expect("Failed to create backend directory");
+    if let Err(e) = std::fs::create_dir_all(dir) {
+        let msg = format!("Failed to create backend directory:\n{}", e);
+        update_status(app, "error", &msg, 0);
+        return;
+    }
 
     let zip_path = dir.join("repo.zip");
     let url = "https://github.com/Nicholas-Wilkins/Gladiator/archive/refs/heads/main.zip";
@@ -313,15 +329,30 @@ fn install_backend(dir: &PathBuf, app: &tauri::AppHandle) {
 
     let extracted = dir.join("Gladiator-main");
     let backend = dir.join("backend");
-    std::fs::rename(&extracted, &backend).expect("Failed to rename extracted directory");
+    if let Err(e) = std::fs::rename(&extracted, &backend) {
+        // rename fails across filesystem boundaries; fall back to copy+delete
+        match copy_dir(&extracted, &backend) {
+            Ok(()) => {
+                let _ = std::fs::remove_dir_all(&extracted);
+            }
+            Err(copy_err) => {
+                let msg = format!(
+                    "Failed to move backend files:\nrename: {}\ncopy: {}",
+                    e, copy_err
+                );
+                update_status(app, "error", &msg, 0);
+                return;
+            }
+        }
+    }
     let _ = std::fs::remove_file(&zip_path);
 
     update_status(app, "venv", "Setting up Python environment\u{2026}", 30);
     let venv_dir = dir.join(".venv");
-    match Command::new(python_name())
-        .args(["-m", "venv", &venv_dir.to_string_lossy()])
-        .output()
-    {
+    let mut venv_cmd = Command::new(python_name());
+    venv_cmd.args(["-m", "venv", &venv_dir.to_string_lossy()]);
+    venv_cmd.env_remove("PYTHONHOME");
+    match venv_cmd.output() {
         Ok(out) if out.status.success() => {}
         Ok(out) => {
             let stderr = String::from_utf8_lossy(&out.stderr);
@@ -364,10 +395,10 @@ fn install_backend(dir: &PathBuf, app: &tauri::AppHandle) {
 
     update_status(app, "deps", "Installing Python packages\u{2026}", 40);
     let req_path = backend.join("requirements.txt");
-    match Command::new(&venv_pip(&venv_dir))
-        .args(["install", "-r", &req_path.to_string_lossy()])
-        .output()
-    {
+    let mut pip_req = Command::new(&venv_pip(&venv_dir));
+    pip_req.args(["install", "-r", &req_path.to_string_lossy()]);
+    pip_req.env_remove("PYTHONHOME");
+    match pip_req.output() {
         Ok(out) if out.status.success() => {}
         Ok(out) => {
             let stderr = String::from_utf8_lossy(&out.stderr);
@@ -383,15 +414,15 @@ fn install_backend(dir: &PathBuf, app: &tauri::AppHandle) {
     }
 
     update_status(app, "torch", "Installing PyTorch (CPU-only)\u{2026}", 65);
-    match Command::new(&venv_pip(&venv_dir))
-        .args([
-            "install",
-            "torch",
-            "--index-url",
-            "https://download.pytorch.org/whl/cpu",
-        ])
-        .output()
-    {
+    let mut pip_torch = Command::new(&venv_pip(&venv_dir));
+    pip_torch.args([
+        "install",
+        "torch",
+        "--index-url",
+        "https://download.pytorch.org/whl/cpu",
+    ]);
+    pip_torch.env_remove("PYTHONHOME");
+    match pip_torch.output() {
         Ok(out) if out.status.success() => {}
         Ok(out) => {
             let stderr = String::from_utf8_lossy(&out.stderr);
@@ -411,6 +442,26 @@ fn install_backend(dir: &PathBuf, app: &tauri::AppHandle) {
         return;
     }
     eprintln!("[gladiator-gui] Backend installation complete!");
+}
+
+fn copy_dir(src: &PathBuf, dst: &PathBuf) -> Result<(), String> {
+    let _ = std::fs::remove_dir_all(dst);
+    std::fs::create_dir_all(dst).map_err(|e| format!("create_dir_all: {}", e))?;
+    let entries = std::fs::read_dir(src).map_err(|e| format!("read_dir: {}", e))?;
+    for entry in entries {
+        let entry = entry.map_err(|e| format!("entry: {}", e))?;
+        let ty = entry.file_type().map_err(|e| format!("file_type: {}", e))?;
+        let name = entry.file_name();
+        let src_path = entry.path();
+        let dst_path = dst.join(&name);
+        if ty.is_dir() {
+            copy_dir(&src_path, &dst_path)?;
+        } else {
+            std::fs::copy(&src_path, &dst_path)
+                .map_err(|e| format!("copy {}: {}", name.to_string_lossy(), e))?;
+        }
+    }
+    Ok(())
 }
 
 fn find_venv_site_packages(venv_dir: &PathBuf) -> Option<PathBuf> {
@@ -436,9 +487,18 @@ fn try_start_server(
     kill_port(8742);
     let mut cmd = Command::new(bin);
     cmd.arg(script).arg("8742");
+    // Preserve any user-set PYTHONPATH by appending our venv path
     if let Some(sp) = site_packages {
-        cmd.env("PYTHONPATH", sp);
+        let existing = std::env::var("PYTHONPATH").unwrap_or_default();
+        let combined = if existing.is_empty() {
+            sp.to_string_lossy().to_string()
+        } else {
+            format!("{}:{}", sp.display(), existing)
+        };
+        cmd.env("PYTHONPATH", combined);
     }
+    // Clear PYTHONHOME to prevent AppImage env corruption of stdlib lookup
+    cmd.env_remove("PYTHONHOME");
     let mut child = cmd.spawn().map_err(|e| format!("Failed to spawn: {}", e))?;
     std::thread::sleep(std::time::Duration::from_millis(400));
     match child.try_wait() {
@@ -466,15 +526,27 @@ fn start_production_server(app_handle: &tauri::AppHandle) {
     // ── Find a working python binary ────────────────────────────
     let venv_py = venv_python(&venv_dir);
     let system_py = PathBuf::from(python_name());
-    let sp = find_venv_site_packages(&venv_dir);
+    let mut sp = find_venv_site_packages(&venv_dir);
 
-    let (bin, label) =
-        if venv_py.exists() && Command::new(&venv_py).arg("--version").output().is_ok() {
-            (venv_py, "venv")
-        } else {
-            eprintln!("[gladiator-gui] venv Python broken, using system python");
-            (system_py, "system")
-        };
+    // --version is too shallow (passes even when stdlib is broken).
+    // Actually check that Python can import its own stdlib.
+    let venv_ok = venv_py.exists() && python_stdlib_ok(&venv_py);
+    let sys_ok = python_stdlib_ok(&system_py);
+
+    let (bin, label) = if venv_ok {
+        (venv_py, "venv")
+    } else if sys_ok {
+        eprintln!("[gladiator-gui] venv Python broken (stdlib check failed), using system python");
+        (system_py, "system")
+    } else {
+        let msg = "No working Python interpreter found. Make sure Python 3 is installed and its standard library is intact.".to_string();
+        update_status(app_handle, "error", &msg, 0);
+        return;
+    };
+
+    // When using system python, we need the venv's site-packages on PYTHONPATH
+    // so the server can find installed deps.
+    let site_pkgs = if label == "system" { sp.take() } else { None };
 
     // ── Ensure critical deps are importable ─────────────────────
     let python = &bin;
@@ -487,16 +559,19 @@ fn start_production_server(app_handle: &tauri::AppHandle) {
                 "Installing missing Python packages\u{2026}",
                 85,
             );
-            // Try inside the venv first, then globally
+            // Try #1: venv pip (uses the pip script with its shebang)
             let installed = if venv_dir.join("bin").join("pip").exists() {
                 pip_install(&venv_dir, &["fastapi", "uvicorn[standard]"]).is_ok()
             } else {
                 false
             };
             if !installed {
-                // Fall back to system pip
-                let result = Command::new(python)
+                // Try #2: system python with clean env (clear PYTHONHOME
+                // which can corrupt stdlib lookup in AppImage environments)
+                let sys_py = PathBuf::from(python_name());
+                let result = Command::new(&sys_py)
                     .args(["-m", "pip", "install", "fastapi", "uvicorn[standard]"])
+                    .env_remove("PYTHONHOME")
                     .output();
                 match result {
                     Ok(out) if out.status.success() => {}
@@ -513,6 +588,15 @@ fn start_production_server(app_handle: &tauri::AppHandle) {
                     }
                 }
             }
+            // Verify the install actually took effect
+            if !can_import(python, mod_name) {
+                let msg = format!(
+                    "{} still not importable after install. Try running:\n  pip install fastapi uvicorn[standard]",
+                    mod_name
+                );
+                update_status(app_handle, "error", &msg, 0);
+                return;
+            }
         }
     }
 
@@ -522,7 +606,7 @@ fn start_production_server(app_handle: &tauri::AppHandle) {
         label,
         python.display()
     );
-    match try_start_server(python, &script, &sp) {
+    match try_start_server(python, &script, &site_pkgs) {
         Ok(child) => {
             *app_handle.state::<ApiProcess>().0.lock().unwrap() = Some(child);
             update_status(app_handle, "ready", "Ready!", 100);

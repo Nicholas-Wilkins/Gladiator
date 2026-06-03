@@ -38,17 +38,21 @@ async function pollSetupStatus() {
     const status = await window.__TAURI__.core.invoke("get_setup_status");
     if (status.step === "ready") {
       updateSetup("Ready!", 100);
+      if (setupSpinner) setupSpinner.style.display = "none";
       setupReadyReceived = true;
       setTimeout(tryHideSetup, 400);
+      // Safety net: if WS never connects within 15s, hide the overlay anyway
+      setTimeout(() => { if (!setupResolved) hideSetup(); }, 15000);
     } else if (status.step === "error") {
       updateSetup("Error: " + (status.message || "Unknown error"), 0);
       if (setupSpinner) setupSpinner.style.display = "none";
       if (setupNote) setupNote.textContent = "Close and re-open the app to try again.";
     } else {
+      if (setupSpinner) setupSpinner.style.display = "";
       updateSetup(status.message, status.progress);
     }
   } catch (_) {
-    // Not running inside Tauri or command not available yet
+    // poll too early — command not available yet; that's fine
   }
 }
 
