@@ -75,6 +75,13 @@ jobs:
         run: npx tauri build
         working-directory: gui/src-tauri
 
+      - name: Create Linux updater artifact
+        if: matrix.os == 'ubuntu-latest'
+        shell: bash
+        run: |
+          cd gui/src-tauri/target/release/bundle/appimage
+          tar czf Gladiator_*.AppImage.tar.gz Gladiator_*.AppImage
+
       - name: List build output
         shell: bash
         run: ls -la gui/src-tauri/target/release/ 2>/dev/null || echo "No target/release directory"
@@ -96,12 +103,37 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
+
       - uses: actions/download-artifact@v4
-      - name: Collect artifacts
+
+      - name: Install Tauri CLI (for signer)
+        run: npm install -g @tauri-apps/cli
+
+      - name: Collect and sign artifacts
+        shell: bash
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
         run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+
+          # Copy ALL installer/bundle files to a flat release dir (same as original CI)
           mkdir -p release
           find . -type f \( -name "*.deb" -o -name "*.AppImage" -o -name "*.dmg" -o -name "*.exe" -o -name "*.msi" \) -exec cp {} release/ \;
+
+          # Re-structure into the layout scripts/release.sh expects, for signing
+          mkdir -p bundle/appimage bundle/msi bundle/dmg
+          find . -type d -name appimage -exec sh -c 'cp "$1"/* bundle/appimage/' _ {} \; 2>/dev/null || true
+          find . -type d -name msi     -exec sh -c 'cp "$1"/* bundle/msi/'     _ {} \; 2>/dev/null || true
+          find . -type d -name dmg     -exec sh -c 'cp "$1"/* bundle/dmg/'     _ {} \; 2>/dev/null || true
+
+          # Run the release script against the re-structured bundle dir
+          BUNDLE_DIR="$PWD/bundle" bash scripts/release.sh "$VERSION" > bundle/latest.json
+
+          # Copy generated files (tar.gz, latest.json) into the release dir
+          find bundle -type f \( -name "*.tar.gz" -o -name "latest.json" \) -exec cp {} release/ \;
           ls -la release/
+
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:

@@ -1,6 +1,6 @@
 {
   "productName": "Gladiator",
-  "version": "0.1.0",
+  "version": "0.1.23",
   "identifier": "com.gladiator.gui",
   "build": {
     "frontendDist": "../src",
@@ -47,7 +47,7 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "REPLACE_ME_WITH_YOUR_PUBLIC_KEY",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDJCM0RFNUJDMzIxMEY1NUUKUldSZTlSQXl2T1U5S3hBZ0wraUVQS0g0dU9BVkZGQkpYY0lmTkQ1UGZFWi9ZaEhTSEU5NW14QTQK",
       "endpoints": [
         "https://github.com/Nicholas-Wilkins/Gladiator/releases/latest/download/latest.json"
       ],

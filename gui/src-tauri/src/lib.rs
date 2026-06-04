@@ -374,8 +374,9 @@ fn install_backend(dir: &PathBuf, app: &tauri::AppHandle) -> bool {
         return false;
     }
 
-    // Extract to a temp dir so the old backend stays intact until we're ready
-    let tmp_extract = dir.join(".tmp_extract");
+    // Extract to a temp dir outside dir/ so remove_dir_all(dir) doesn't nuke it
+    let tmp_extract = std::env::temp_dir().join("gladiator_extract");
+    let _ = std::fs::remove_dir_all(&tmp_extract);
     let _ = std::fs::create_dir_all(&tmp_extract);
     if !extract_zip(&zip_path, &tmp_extract, app) {
         try_restore_user_data(&backup, &old_backend);
