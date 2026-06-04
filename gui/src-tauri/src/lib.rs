@@ -131,22 +131,9 @@ fn data_dir() -> PathBuf {
 }
 
 fn download_file(url: &str, dest: &PathBuf, app: &tauri::AppHandle) -> bool {
-    let result = if cfg!(target_os = "windows") {
-        Command::new("powershell")
-            .args([
-                "-Command",
-                &format!(
-                    "Invoke-WebRequest -Uri '{}' -OutFile '{}'",
-                    url,
-                    dest.display()
-                ),
-            ])
-            .output()
-    } else {
-        Command::new("curl")
-            .args(["-L", "-o", &dest.to_string_lossy(), url])
-            .output()
-    };
+    let result = Command::new("curl")
+        .args(["-L", "-o", &dest.to_string_lossy(), url])
+        .output();
 
     match result {
         Ok(out) if out.status.success() => true,
