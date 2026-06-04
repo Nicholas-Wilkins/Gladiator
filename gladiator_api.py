@@ -254,7 +254,7 @@ async def create_session(body: dict):
 
             worker_seed = (seed or 0) + i if seed is not None else None
 
-            cmd = [python, str(SCRIPT_DIR / cfg["main"]), "--no-ui", "--db", db_path]
+            cmd = [python, "--worker", engine, "--no-ui", "--db", db_path]
             if worker_seed is not None:
                 cmd.extend(["--seed", str(worker_seed)])
             if max_games is not None:
@@ -381,7 +381,7 @@ async def export_bot(body: dict):
     output = body.get("output")
 
     python = sys.executable
-    cmd = [python, str(SCRIPT_DIR / "export_bot.py"), "--engine", engine, "--db", db_path]
+    cmd = [python, "--export", "--engine", engine, "--db", db_path]
     if bot_id:
         cmd.extend(["--bot-id", bot_id])
     if output:
@@ -405,7 +405,7 @@ async def promote_bot(body: dict):
     bot_id = body.get("bot_id")
 
     python = sys.executable
-    cmd = [python, str(SCRIPT_DIR / "promote_bot.py"), "--engine", engine, "--db", db_path]
+    cmd = [python, "--promote", "--engine", engine, "--db", db_path]
     if bot_id:
         cmd.extend(["--bot-id", bot_id])
 
@@ -894,7 +894,7 @@ async def play_stop(game_id: str):
 # Static frontend (mount AFTER all API routes)
 # ---------------------------------------------------------------------------
 
-SCRIPT_DIR = Path(__file__).parent.resolve()
+SCRIPT_DIR = Path(os.environ.get("GLADIATOR_DATA_DIR", Path(__file__).parent.resolve()))
 GUI_DIR = SCRIPT_DIR / "gui" / "src"
 if GUI_DIR.exists():
     app.mount("/", StaticFiles(directory=str(GUI_DIR), html=True), name="gui")
@@ -911,4 +911,28 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    if len(sys.argv) > 2 and sys.argv[1] == "--worker":
+        engine = sys.argv[2]
+        sys.argv = [sys.argv[0]] + sys.argv[3:]
+        if engine == "cpu":
+            import main as _m
+        elif engine == "nn":
+            import main_nn as _m
+        elif engine == "mini":
+            import main_mini as _m
+        elif engine == "nn-mini":
+            import main_nn_mini as _m
+        else:
+            print(f"Unknown engine: {engine}", file=sys.stderr)
+            sys.exit(1)
+        _m.main()
+    elif len(sys.argv) > 1 and sys.argv[1] == "--export":
+        sys.argv = [sys.argv[0]] + sys.argv[2:]
+        import export_bot as _m
+        _m.main()
+    elif len(sys.argv) > 1 and sys.argv[1] == "--promote":
+        sys.argv = [sys.argv[0]] + sys.argv[2:]
+        import promote_bot as _m
+        _m.main()
+    else:
+        main()
