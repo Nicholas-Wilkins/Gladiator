@@ -76,7 +76,7 @@ jobs:
         working-directory: gui/src-tauri
 
       - name: Create Linux updater artifact
-        if: matrix.os == 'ubuntu-latest'
+        if: matrix.os == 'ubuntu-latest' && startsWith(github.ref, 'refs/tags/v')
         shell: bash
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
