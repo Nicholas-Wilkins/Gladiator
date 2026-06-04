@@ -79,8 +79,9 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         shell: bash
         run: |
+          VERSION="${GITHUB_REF_NAME#v}"
           cd gui/src-tauri/target/release/bundle/appimage
-          tar czf Gladiator_*.AppImage.tar.gz Gladiator_*.AppImage
+          tar czf "Gladiator_${VERSION}_amd64.AppImage.tar.gz" "Gladiator_${VERSION}_amd64.AppImage"
 
       - name: List build output
         shell: bash
