@@ -214,7 +214,7 @@ function renderSessionList(sessions) {
   el.innerHTML = sessions.map(s => {
     const data = s.champion || {};
     const isRunning = s.status === "running";
-    const wid = s.worker_id !== null && s.worker_id !== undefined ? `W${s.worker_id}` : "";
+    const wid = s.worker_id !== null && s.worker_id !== undefined ? `W${s.worker_id + 1}` : "";
     return `<div class="session-item">
       <div class="session-board">
         ${renderBoard(s.board, true)}
@@ -255,12 +255,12 @@ async function refreshTrainingSessions() {
   }
   log.textContent = sessions.map(s => {
     const d = s.champion || {};
-    return `[${s.engine}${s.worker_id !== null ? "#"+s.worker_id : ""}] PID ${s.pid} ${s.status} gen=${d.generation||"?"} ${d.mode||"?"} matches=${d.total_matches??"?"} streak=${d.consecutive_wins??"?"}`;
+    return `[${s.engine}${s.worker_id !== null ? "#"+(s.worker_id+1) : ""}] PID ${s.pid} ${s.status} gen=${d.generation||"?"} ${d.mode||"?"} matches=${d.total_matches??"?"} streak=${d.consecutive_wins??"?"}`;
   }).join("\n");
   el.innerHTML = sessions.map(s => {
     const data = s.champion || {};
     const isRunning = s.status === "running";
-    const wid = s.worker_id !== null && s.worker_id !== undefined ? `Worker ${s.worker_id}` : "";
+    const wid = s.worker_id !== null && s.worker_id !== undefined ? `Worker ${s.worker_id + 1}` : "";
     return `<div class="session-item">
       <div class="session-board">${renderBoard(s.board, false)}</div>
       <div class="info">
