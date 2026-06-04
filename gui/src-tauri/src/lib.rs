@@ -1,9 +1,26 @@
 use serde::Serialize;
 use std::io::Read;
+#[cfg(target_os = "windows")]
+use std::net::TcpStream;
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::sync::Mutex;
+#[cfg(target_os = "windows")]
+use std::time::{Duration, Instant};
 use tauri::Manager;
+
+#[cfg(target_os = "windows")]
+const CREATE_NO_WINDOW: u32 = 0x08000000;
+
+fn cmd(program: &str) -> Command {
+    #[allow(unused_mut)]
+    let mut c = Command::new(program);
+    #[cfg(target_os = "windows")]
+    c.creation_flags(CREATE_NO_WINDOW);
+    c
+}
 
 struct ApiProcess(Mutex<Option<Child>>);
 
@@ -67,7 +84,7 @@ fn find_python() -> String {
 
 fn kill_port(port: u16) {
     if cfg!(target_os = "windows") {
-        Command::new("powershell")
+        cmd("powershell")
             .args([
                 "-Command",
                 &format!("Get-Process -Id (Get-NetTCPConnection -LocalPort {}).OwningProcess -ErrorAction SilentlyContinue | Stop-Process -Force", port),
@@ -96,7 +113,7 @@ fn start_dev_server(app_handle: &tauri::AppHandle) {
 
     kill_port(8742);
 
-    let child = Command::new(&python)
+    let child = cmd(&python)
         .arg(&script)
         .arg("8742")
         .spawn()
@@ -131,7 +148,7 @@ fn data_dir() -> PathBuf {
 }
 
 fn download_file(url: &str, dest: &PathBuf, app: &tauri::AppHandle) -> bool {
-    let result = Command::new("curl")
+    let result = cmd("curl")
         .args(["-L", "-o", &dest.to_string_lossy(), url])
         .output();
 
@@ -238,7 +255,7 @@ fn start_production_server(app_handle: &tauri::AppHandle) {
 
     kill_port(8742);
 
-    let mut child = match Command::new(&binary_path)
+    let mut child = match cmd(&binary_path.to_string_lossy())
         .arg("8742")
         .stderr(Stdio::piped())
         .spawn()
@@ -251,44 +268,70 @@ fn start_production_server(app_handle: &tauri::AppHandle) {
         }
     };
 
-    std::thread::sleep(std::time::Duration::from_millis(400));
+    let deadline = Instant::now() + Duration::from_secs(30);
+    let addr = "127.0.0.1:8742";
+    let mut ready = false;
 
-    match child.try_wait() {
-        Ok(Some(status)) => {
-            let code = status.code().map(|c| c.to_string()).unwrap_or_default();
-            let mut stderr_buf = String::new();
-            if let Some(mut stderr_pipe) = child.stderr.take() {
-                let _ = stderr_pipe.read_to_string(&mut stderr_buf);
+    while Instant::now() < deadline {
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                let code = status.code().map(|c| c.to_string()).unwrap_or_default();
+                let mut stderr_buf = String::new();
+                if let Some(mut stderr_pipe) = child.stderr.take() {
+                    let _ = stderr_pipe.read_to_string(&mut stderr_buf);
+                }
+                let stderr = stderr_buf.trim();
+                if stderr.is_empty() {
+                    update_status(
+                        app_handle,
+                        "error",
+                        &format!("Backend exited immediately (code {})", code),
+                        0,
+                    );
+                } else {
+                    update_status(
+                        app_handle,
+                        "error",
+                        &format!("Backend exited immediately (code {}):\n{}", code, stderr),
+                        0,
+                    );
+                }
+                return;
             }
-            let stderr = stderr_buf.trim();
-            if stderr.is_empty() {
+            Ok(None) => {
+                if let Ok(stream) =
+                    TcpStream::connect_timeout(&addr.parse().unwrap(), Duration::from_millis(500))
+                {
+                    drop(stream);
+                    ready = true;
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(500));
+            }
+            Err(e) => {
                 update_status(
                     app_handle,
                     "error",
-                    &format!("Backend exited immediately (code {})", code),
+                    &format!("Process check failed: {}", e),
                     0,
                 );
-            } else {
-                update_status(
-                    app_handle,
-                    "error",
-                    &format!("Backend exited immediately (code {}):\n{}", code, stderr),
-                    0,
-                );
+                return;
             }
         }
-        Ok(None) => {
-            *app_handle.state::<ApiProcess>().0.lock().unwrap() = Some(child);
-            update_status(app_handle, "ready", "Ready!", 100);
-        }
-        Err(e) => {
-            update_status(
-                app_handle,
-                "error",
-                &format!("Process check failed: {}", e),
-                0,
-            );
-        }
+    }
+
+    if ready {
+        *app_handle.state::<ApiProcess>().0.lock().unwrap() = Some(child);
+        update_status(app_handle, "ready", "Ready!", 100);
+    } else {
+        let _ = child.kill();
+        let _ = child.wait();
+        update_status(
+            app_handle,
+            "error",
+            "Backend did not start within 30 seconds",
+            0,
+        );
     }
 }
 
