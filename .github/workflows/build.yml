@@ -123,12 +123,14 @@ jobs:
           pip install pyinstaller
 
       - name: Build standalone backend
+        shell: bash
         run: |
+          SEP=$([[ "${{ matrix.os }}" == "windows-latest" ]] && echo ";" || echo ":")
           pyinstaller --onefile \
             --name gladiator-backend \
-            --add-data "gladiator_nn:gladiator_nn" \
-            --add-data "gladiator_mini:gladiator_mini" \
-            --add-data "gladiator_nn_mini:gladiator_nn_mini" \
+            --add-data "gladiator_nn${SEP}gladiator_nn" \
+            --add-data "gladiator_mini${SEP}gladiator_mini" \
+            --add-data "gladiator_nn_mini${SEP}gladiator_nn_mini" \
             --hidden-import gladiator_nn \
             --hidden-import gladiator_mini \
             --hidden-import gladiator_nn_mini \
