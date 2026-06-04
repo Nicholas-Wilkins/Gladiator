@@ -102,12 +102,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
-            artifact-name: gladiator-backend-x86_64-linux
           - os: windows-latest
             artifact-name: gladiator-backend-x86_64-windows.exe
-          - os: macos-latest
-            artifact-name: gladiator-backend-aarch64-macos
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4

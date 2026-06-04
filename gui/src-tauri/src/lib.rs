@@ -130,38 +130,6 @@ fn data_dir() -> PathBuf {
     base.join("gladiator")
 }
 
-fn backend_binary_name() -> &'static str {
-    if cfg!(target_os = "windows") {
-        "gladiator-backend-x86_64-windows.exe"
-    } else if cfg!(target_os = "macos") {
-        "gladiator-backend-aarch64-macos"
-    } else {
-        "gladiator-backend-x86_64-linux"
-    }
-}
-
-fn backend_download_url(version: &str) -> String {
-    format!(
-        "https://github.com/Nicholas-Wilkins/Gladiator/releases/download/v{}/{}",
-        version,
-        backend_binary_name()
-    )
-}
-
-fn is_backend_installed(dir: &PathBuf) -> bool {
-    let installed = dir.join(".installed");
-    if !installed.exists() {
-        return false;
-    }
-    if let Ok(stored) = std::fs::read_to_string(&installed) {
-        if stored.trim() != env!("CARGO_PKG_VERSION") {
-            return false;
-        }
-    }
-    let backend_path = dir.join("backend").join(backend_binary_name());
-    backend_path.exists()
-}
-
 fn download_file(url: &str, dest: &PathBuf, app: &tauri::AppHandle) -> bool {
     let result = if cfg!(target_os = "windows") {
         Command::new("powershell")
@@ -199,6 +167,38 @@ fn download_file(url: &str, dest: &PathBuf, app: &tauri::AppHandle) -> bool {
     }
 }
 
+// ── Windows: download and run pre-built PyInstaller binary ──────
+
+#[cfg(target_os = "windows")]
+fn backend_binary_name() -> &'static str {
+    "gladiator-backend-x86_64-windows.exe"
+}
+
+#[cfg(target_os = "windows")]
+fn backend_download_url(version: &str) -> String {
+    format!(
+        "https://github.com/Nicholas-Wilkins/Gladiator/releases/download/v{}/{}",
+        version,
+        backend_binary_name()
+    )
+}
+
+#[cfg(target_os = "windows")]
+fn is_backend_installed(dir: &PathBuf) -> bool {
+    let installed = dir.join(".installed");
+    if !installed.exists() {
+        return false;
+    }
+    if let Ok(stored) = std::fs::read_to_string(&installed) {
+        if stored.trim() != env!("CARGO_PKG_VERSION") {
+            return false;
+        }
+    }
+    let backend_path = dir.join("backend").join(backend_binary_name());
+    backend_path.exists()
+}
+
+#[cfg(target_os = "windows")]
 fn install_backend(dir: &PathBuf, app: &tauri::AppHandle) -> bool {
     eprintln!("[gladiator-gui] Installing backend to {}", dir.display());
 
@@ -220,13 +220,6 @@ fn install_backend(dir: &PathBuf, app: &tauri::AppHandle) -> bool {
         return false;
     }
 
-    // Make executable on Unix
-    #[cfg(not(target_os = "windows"))]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&binary_path, std::fs::Permissions::from_mode(0o755)).ok();
-    }
-
     if std::fs::write(dir.join(".installed"), env!("CARGO_PKG_VERSION")).is_err() {
         update_status(app, "error", "Failed to create installation marker.", 0);
         return false;
@@ -235,6 +228,7 @@ fn install_backend(dir: &PathBuf, app: &tauri::AppHandle) -> bool {
     true
 }
 
+#[cfg(target_os = "windows")]
 fn start_production_server(app_handle: &tauri::AppHandle) {
     let dir = data_dir();
     let binary_path = dir.join("backend").join(backend_binary_name());
@@ -259,7 +253,6 @@ fn start_production_server(app_handle: &tauri::AppHandle) {
 
     let mut child = match Command::new(&binary_path)
         .arg("8742")
-        .env("GLADIATOR_DATA_DIR", dir.to_string_lossy().to_string())
         .stderr(Stdio::piped())
         .spawn()
     {
@@ -308,6 +301,550 @@ fn start_production_server(app_handle: &tauri::AppHandle) {
                 &format!("Process check failed: {}", e),
                 0,
             );
+        }
+    }
+}
+
+// ── Linux/macOS: venv/pip approach ──────────────────────────────
+
+#[cfg(not(target_os = "windows"))]
+fn venv_python(venv_dir: &PathBuf) -> PathBuf {
+    let bin = venv_dir.join("bin");
+    let candidates = ["python3", "python"];
+    for name in &candidates {
+        let p = bin.join(name);
+        if p.exists() {
+            return p;
+        }
+    }
+    if let Ok(entries) = std::fs::read_dir(&bin) {
+        let mut pythons: Vec<_> = entries
+            .filter_map(|e| e.ok())
+            .filter(|e| {
+                let name = e.file_name();
+                let s = name.to_string_lossy();
+                s.starts_with("python") || s.starts_with("python3")
+            })
+            .map(|e| e.path())
+            .collect();
+        pythons.sort();
+        if let Some(p) = pythons.first() {
+            return p.clone();
+        }
+    }
+    venv_dir.join("bin").join("python3")
+}
+
+#[cfg(not(target_os = "windows"))]
+fn venv_pip(venv_dir: &PathBuf) -> PathBuf {
+    venv_dir.join("bin").join("pip")
+}
+
+#[cfg(not(target_os = "windows"))]
+fn python_stdlib_ok(python: &PathBuf) -> bool {
+    Command::new(python)
+        .args(["-c", "import encodings"])
+        .env_remove("PYTHONHOME")
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
+
+#[cfg(not(target_os = "windows"))]
+fn python_name() -> String {
+    let py3 = PathBuf::from("python3");
+    if python_stdlib_ok(&py3) {
+        return "python3".to_string();
+    }
+    let py = PathBuf::from("python");
+    if python_stdlib_ok(&py) {
+        return "python".to_string();
+    }
+    "python3".to_string()
+}
+
+#[cfg(not(target_os = "windows"))]
+fn pip_install(venv_dir: &PathBuf, pkgs: &[&str]) -> Result<String, String> {
+    let mut cmd = Command::new(&venv_pip(venv_dir));
+    cmd.args(["install"]);
+    cmd.args(pkgs);
+    cmd.env_remove("PYTHONHOME");
+    let out = cmd
+        .output()
+        .map_err(|e| format!("Failed to run pip: {}", e))?;
+    if out.status.success() {
+        let text = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        Ok(text)
+    } else {
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        Err(stderr.trim().to_string())
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn can_import(python: &PathBuf, module: &str) -> bool {
+    Command::new(python)
+        .args(["-c", &format!("import {}", module)])
+        .env_remove("PYTHONHOME")
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
+
+#[cfg(not(target_os = "windows"))]
+fn extract_zip(zip_path: &PathBuf, dest: &PathBuf, app: &tauri::AppHandle) -> bool {
+    let result = Command::new("unzip")
+        .args([
+            "-o",
+            &zip_path.to_string_lossy(),
+            "-d",
+            &dest.to_string_lossy(),
+        ])
+        .output();
+
+    match result {
+        Ok(out) if out.status.success() => true,
+        Ok(out) => {
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            update_status(
+                app,
+                "error",
+                &format!("Extraction failed:\n{}", stderr.trim()),
+                0,
+            );
+            false
+        }
+        Err(e) => {
+            update_status(app, "error", &format!("Failed to run unzip: {}", e), 0);
+            false
+        }
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn copy_dir(src: &PathBuf, dst: &PathBuf) -> Result<(), String> {
+    let _ = std::fs::remove_dir_all(dst);
+    std::fs::create_dir_all(dst).map_err(|e| format!("create_dir_all: {}", e))?;
+    let entries = std::fs::read_dir(src).map_err(|e| format!("read_dir: {}", e))?;
+    for entry in entries {
+        let entry = entry.map_err(|e| format!("entry: {}", e))?;
+        let ty = entry.file_type().map_err(|e| format!("file_type: {}", e))?;
+        let name = entry.file_name();
+        let src_path = entry.path();
+        let dst_path = dst.join(&name);
+        if ty.is_dir() {
+            copy_dir(&src_path, &dst_path)?;
+        } else {
+            std::fs::copy(&src_path, &dst_path)
+                .map_err(|e| format!("copy {}: {}", name.to_string_lossy(), e))?;
+        }
+    }
+    Ok(())
+}
+
+#[cfg(not(target_os = "windows"))]
+fn find_venv_site_packages(venv_dir: &PathBuf) -> Option<PathBuf> {
+    let lib = venv_dir.join("lib");
+    let ok = std::fs::read_dir(&lib).ok()?;
+    let py_ver = ok
+        .filter_map(|e| e.ok())
+        .map(|e| e.file_name())
+        .find(|n| n.to_string_lossy().starts_with("python3"))?;
+    let sp = lib.join(&py_ver).join("site-packages");
+    if sp.exists() {
+        Some(sp)
+    } else {
+        None
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn try_start_server(
+    bin: &PathBuf,
+    script: &PathBuf,
+    site_packages: &Option<PathBuf>,
+) -> Result<Child, String> {
+    kill_port(8742);
+    let mut cmd = Command::new(bin);
+    cmd.arg(script).arg("8742");
+    cmd.stderr(Stdio::piped());
+    if let Some(sp) = site_packages {
+        let existing = std::env::var("PYTHONPATH").unwrap_or_default();
+        let combined = if existing.is_empty() {
+            sp.to_string_lossy().to_string()
+        } else {
+            format!("{}:{}", sp.display(), existing)
+        };
+        cmd.env("PYTHONPATH", combined);
+    }
+    cmd.env_remove("PYTHONHOME");
+    let mut child = cmd.spawn().map_err(|e| format!("Failed to spawn: {}", e))?;
+    std::thread::sleep(std::time::Duration::from_millis(400));
+    match child.try_wait() {
+        Ok(Some(status)) => {
+            let code = status.code().map(|c| c.to_string()).unwrap_or_default();
+            let mut stderr_buf = String::new();
+            if let Some(mut stderr_pipe) = child.stderr.take() {
+                let _ = stderr_pipe.read_to_string(&mut stderr_buf);
+            }
+            let stderr = stderr_buf.trim();
+            if stderr.is_empty() {
+                Err(format!("exited immediately (code {})", code))
+            } else {
+                Err(format!("exited immediately (code {}):\n{}", code, stderr))
+            }
+        }
+        Ok(None) => Ok(child),
+        Err(e) => Err(format!("process check failed: {}", e)),
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn preserve_user_data(src: &PathBuf, dst: &PathBuf) {
+    let _ = std::fs::create_dir_all(dst);
+    if let Ok(entries) = std::fs::read_dir(src) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().map_or(false, |e| e == "db") {
+                let _ = std::fs::copy(&path, dst.join(path.file_name().unwrap()));
+            }
+        }
+    }
+    let exported = src.join("exported_bots");
+    if exported.exists() {
+        let _ = copy_dir(&exported, &dst.join("exported_bots"));
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn try_restore_user_data(backup: &PathBuf, dest: &PathBuf) {
+    if backup.exists() {
+        let _ = std::fs::create_dir_all(dest);
+        preserve_user_data(backup, dest);
+        let _ = std::fs::remove_dir_all(backup);
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn is_backend_installed(dir: &PathBuf) -> bool {
+    let installed = dir.join(".installed");
+    if !installed.exists() {
+        return false;
+    }
+    if let Ok(stored) = std::fs::read_to_string(&installed) {
+        if stored.trim() != env!("CARGO_PKG_VERSION") {
+            return false;
+        }
+    }
+    let py = venv_python(&dir.join(".venv"));
+    if !py.exists() {
+        return false;
+    }
+    can_import(&py, "fastapi")
+}
+
+#[cfg(not(target_os = "windows"))]
+fn install_backend(dir: &PathBuf, app: &tauri::AppHandle) -> bool {
+    eprintln!("[gladiator-gui] Installing backend to {}", dir.display());
+
+    let backup = std::env::temp_dir().join("gladiator_preserve");
+    let _ = std::fs::remove_dir_all(&backup);
+    let old_backend = dir.join("backend");
+    let had_data = old_backend.exists();
+    if had_data {
+        preserve_user_data(&old_backend, &backup);
+    }
+
+    update_status(
+        app,
+        "downloading",
+        "Downloading backend from GitHub\u{2026}",
+        5,
+    );
+
+    let zip_path = dir.join("repo.zip");
+    let url = "https://github.com/Nicholas-Wilkins/Gladiator/archive/refs/heads/main.zip";
+    if !download_file(url, &zip_path, app) {
+        try_restore_user_data(&backup, &old_backend);
+        return false;
+    }
+
+    update_status(app, "extracting", "Extracting backend\u{2026}", 15);
+    let tmp_extract = std::env::temp_dir().join("gladiator_extract");
+    let _ = std::fs::remove_dir_all(&tmp_extract);
+    let _ = std::fs::create_dir_all(&tmp_extract);
+    if !extract_zip(&zip_path, &tmp_extract, app) {
+        try_restore_user_data(&backup, &old_backend);
+        let _ = std::fs::remove_dir_all(&tmp_extract);
+        return false;
+    }
+
+    let _ = std::fs::remove_dir_all(dir);
+    if std::fs::create_dir_all(dir).is_err() {
+        try_restore_user_data(&backup, &old_backend);
+        return false;
+    }
+
+    let extracted = tmp_extract.join("Gladiator-main");
+    let backend = dir.join("backend");
+    if let Err(e) = std::fs::rename(&extracted, &backend) {
+        match copy_dir(&extracted, &backend) {
+            Ok(()) => {
+                let _ = std::fs::remove_dir_all(&extracted);
+            }
+            Err(copy_err) => {
+                try_restore_user_data(&backup, &backend);
+                update_status(
+                    app,
+                    "error",
+                    &format!(
+                        "Failed to move backend files:\nrename: {}\ncopy: {}",
+                        e, copy_err
+                    ),
+                    0,
+                );
+                return false;
+            }
+        }
+    }
+    let _ = std::fs::remove_file(&zip_path);
+    let _ = std::fs::remove_dir_all(&tmp_extract);
+    try_restore_user_data(&backup, &backend);
+
+    update_status(app, "venv", "Setting up Python environment\u{2026}", 30);
+    let venv_dir = dir.join(".venv");
+    let py_name = python_name();
+    let py_path = PathBuf::from(&py_name);
+    if !python_stdlib_ok(&py_path) {
+        update_status(
+            app,
+            "error",
+            &format!(
+                "Python was not found. Make sure python3 is installed and on the PATH.\n\
+                 Tried: '{}', 'python3', 'python'",
+                py_name
+            ),
+            0,
+        );
+        return false;
+    }
+    let mut venv_cmd = Command::new(&py_name);
+    venv_cmd.args(["-m", "venv", &venv_dir.to_string_lossy()]);
+    venv_cmd.env_remove("PYTHONHOME");
+    match venv_cmd.output() {
+        Ok(out) if out.status.success() => {}
+        Ok(out) => {
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            update_status(
+                app,
+                "error",
+                &format!(
+                    "Failed to create Python virtual environment:\n{}",
+                    stderr.trim()
+                ),
+                0,
+            );
+            return false;
+        }
+        Err(e) => {
+            update_status(
+                app,
+                "error",
+                &format!("Failed to run Python ({}): {}", py_name, e),
+                0,
+            );
+            return false;
+        }
+    }
+
+    let python_bin = venv_python(&venv_dir);
+    if !python_bin.exists() {
+        let bin_dir = venv_dir.join("bin");
+        let contents = match std::fs::read_dir(&bin_dir) {
+            Ok(entries) => entries
+                .filter_map(|e| e.ok().map(|e| e.file_name().to_string_lossy().to_string()))
+                .collect::<Vec<_>>()
+                .join(", "),
+            Err(_) => "directory not found".to_string(),
+        };
+        update_status(
+            app,
+            "error",
+            &format!(
+                "Virtual environment created but no Python binary found in {}.\n\
+                 Contents: {}",
+                bin_dir.display(),
+                contents
+            ),
+            0,
+        );
+        return false;
+    }
+
+    update_status(app, "deps", "Installing Python packages\u{2026}", 40);
+    let req_path = backend.join("requirements.txt");
+    let mut pip_req = Command::new(&venv_pip(&venv_dir));
+    pip_req.args(["install", "-r", &req_path.to_string_lossy()]);
+    pip_req.env_remove("PYTHONHOME");
+    match pip_req.output() {
+        Ok(out) if out.status.success() => {}
+        Ok(out) => {
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            update_status(
+                app,
+                "error",
+                &format!("Failed to install Python packages:\n{}", stderr.trim()),
+                0,
+            );
+            return false;
+        }
+        Err(e) => {
+            update_status(app, "error", &format!("Failed to run pip: {}", e), 0);
+            return false;
+        }
+    }
+
+    update_status(app, "torch", "Installing PyTorch (CPU-only)\u{2026}", 65);
+    let mut pip_torch = Command::new(&venv_pip(&venv_dir));
+    pip_torch.args([
+        "install",
+        "torch",
+        "--index-url",
+        "https://download.pytorch.org/whl/cpu",
+    ]);
+    pip_torch.env_remove("PYTHONHOME");
+    match pip_torch.output() {
+        Ok(out) if out.status.success() => {}
+        Ok(out) => {
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            update_status(
+                app,
+                "error",
+                &format!("Failed to install PyTorch:\n{}", stderr.trim()),
+                0,
+            );
+            return false;
+        }
+        Err(e) => {
+            update_status(
+                app,
+                "error",
+                &format!("Failed to run pip for PyTorch: {}", e),
+                0,
+            );
+            return false;
+        }
+    }
+
+    if std::fs::write(dir.join(".installed"), env!("CARGO_PKG_VERSION")).is_err() {
+        update_status(app, "error", "Failed to create installation marker.", 0);
+        return false;
+    }
+    eprintln!("[gladiator-gui] Backend installation complete!");
+    true
+}
+
+#[cfg(not(target_os = "windows"))]
+fn start_production_server(app_handle: &tauri::AppHandle) {
+    let dir = data_dir();
+    let venv_dir = dir.join(".venv");
+    let script = dir.join("backend").join("gladiator_api.py");
+
+    update_status(
+        app_handle,
+        "starting",
+        "Starting backend server\u{2026}",
+        95,
+    );
+
+    let venv_py = venv_python(&venv_dir);
+    let system_py = PathBuf::from(python_name());
+    let mut sp = find_venv_site_packages(&venv_dir);
+
+    let venv_ok = venv_py.exists() && python_stdlib_ok(&venv_py);
+    let sys_ok = python_stdlib_ok(&system_py);
+
+    let (bin, label) = if venv_ok {
+        (venv_py, "venv")
+    } else if sys_ok {
+        eprintln!("[gladiator-gui] venv Python broken (stdlib check failed), using system python");
+        (system_py, "system")
+    } else {
+        let msg = "No working Python interpreter found. Make sure Python 3 is installed and its standard library is intact.".to_string();
+        update_status(app_handle, "error", &msg, 0);
+        return;
+    };
+
+    let site_pkgs = if label == "system" { sp.take() } else { None };
+
+    let python = &bin;
+    for mod_name in &["fastapi"] {
+        if !can_import(python, mod_name) {
+            eprintln!("[gladiator-gui] {} not importable, installing...", mod_name);
+            update_status(
+                app_handle,
+                "deps",
+                "Installing missing Python packages\u{2026}",
+                85,
+            );
+
+            let installed = if venv_dir.join("bin").join("pip").exists() {
+                pip_install(&venv_dir, &["fastapi", "uvicorn[standard]"]).is_ok()
+            } else {
+                false
+            };
+            if !installed {
+                let sys_py = PathBuf::from(python_name());
+                let mut pip_cmd = Command::new(&sys_py);
+                pip_cmd.args(["-m", "pip", "install", "fastapi", "uvicorn[standard]"]);
+                pip_cmd.env_remove("PYTHONHOME");
+                if label == "venv" {
+                    if let Some(sp) = find_venv_site_packages(&venv_dir) {
+                        pip_cmd.arg("--target");
+                        pip_cmd.arg(sp.to_string_lossy().to_string());
+                    }
+                }
+                let result = pip_cmd.output();
+                match result {
+                    Ok(out) if out.status.success() => {}
+                    Ok(out) => {
+                        let stderr = String::from_utf8_lossy(&out.stderr);
+                        let msg = format!("Failed to install fastapi/uvicorn:\n{}", stderr.trim());
+                        update_status(app_handle, "error", &msg, 0);
+                        return;
+                    }
+                    Err(e) => {
+                        let msg = format!("Failed to run pip: {}", e);
+                        update_status(app_handle, "error", &msg, 0);
+                        return;
+                    }
+                }
+            }
+            if !can_import(python, mod_name) {
+                let msg = format!(
+                    "{} still not importable after install. Try running:\n  pip install fastapi uvicorn[standard]",
+                    mod_name
+                );
+                update_status(app_handle, "error", &msg, 0);
+                return;
+            }
+        }
+    }
+
+    eprintln!(
+        "[gladiator-gui] Starting server with {}: {}",
+        label,
+        python.display()
+    );
+    match try_start_server(python, &script, &site_pkgs) {
+        Ok(child) => {
+            *app_handle.state::<ApiProcess>().0.lock().unwrap() = Some(child);
+            update_status(app_handle, "ready", "Ready!", 100);
+        }
+        Err(e) => {
+            let _ = std::fs::remove_file(dir.join(".installed"));
+            let msg = format!("Python server {}: {}", e, python.display());
+            update_status(app_handle, "error", &msg, 0);
         }
     }
 }
