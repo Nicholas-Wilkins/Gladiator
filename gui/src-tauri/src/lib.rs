@@ -704,32 +704,35 @@ fn install_backend(dir: &PathBuf, app: &tauri::AppHandle) -> bool {
         }
     }
 
-    update_status(app, "torch", "Installing PyTorch (CPU-only)\u{2026}", 65);
-    let mut pip_torch = Command::new(&venv_pip(&venv_dir));
-    pip_torch.args([
-        "install",
+    update_status(
+        app,
         "torch",
-        "--index-url",
-        "https://download.pytorch.org/whl/cpu",
-    ]);
-    pip_torch.env_remove("PYTHONHOME");
-    match pip_torch.output() {
+        "Detecting GPU and installing PyTorch\u{2026}",
+        65,
+    );
+    let mut torch_cmd = Command::new(&venv_python(&venv_dir));
+    torch_cmd.arg(backend.join("install.py"));
+    torch_cmd.current_dir(&backend);
+    torch_cmd.env_remove("PYTHONHOME");
+    match torch_cmd.output() {
         Ok(out) if out.status.success() => {}
         Ok(out) => {
+            let stdout = String::from_utf8_lossy(&out.stdout);
             let stderr = String::from_utf8_lossy(&out.stderr);
-            update_status(
-                app,
-                "error",
-                &format!("Failed to install PyTorch:\n{}", stderr.trim()),
-                0,
-            );
+            let combined = format!("{}\n{}", stdout.trim(), stderr.trim());
+            let msg = if combined.trim().is_empty() {
+                "PyTorch installation failed with no error output.".to_string()
+            } else {
+                format!("PyTorch installation failed:\n{}", combined.trim())
+            };
+            update_status(app, "error", &msg, 0);
             return false;
         }
         Err(e) => {
             update_status(
                 app,
                 "error",
-                &format!("Failed to run pip for PyTorch: {}", e),
+                &format!("Failed to run PyTorch installer: {}", e),
                 0,
             );
             return false;
