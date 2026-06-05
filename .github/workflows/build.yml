@@ -75,13 +75,14 @@ jobs:
           " "$VERSION"
 
       - name: Configure Cargo retry
+        shell: bash
         run: |
           mkdir -p ~/.cargo
-          cat >> ~/.cargo/config.toml << 'EOF'
-          [http]
-          retry = 5
-          timeout = 120
-          EOF
+          node -e "
+            const fs = require('fs');
+            fs.writeFileSync(require('os').homedir() + '/.cargo/config.toml',
+              '[http]\nretry = 5\ntimeout = 120\n');
+          "
 
       - name: Build
         run: npx tauri build
