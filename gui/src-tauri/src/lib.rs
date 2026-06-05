@@ -211,15 +211,6 @@ fn backend_binary_name() -> &'static str {
 }
 
 #[cfg(target_os = "windows")]
-fn backend_download_url(version: &str) -> String {
-    format!(
-        "https://github.com/Nicholas-Wilkins/Gladiator/releases/download/v{}/{}",
-        version,
-        backend_binary_name()
-    )
-}
-
-#[cfg(target_os = "windows")]
 fn is_backend_installed(dir: &PathBuf) -> bool {
     let installed = dir.join(".installed");
     if !installed.exists() {
@@ -244,18 +235,38 @@ fn install_backend(dir: &PathBuf, app: &tauri::AppHandle) -> bool {
     let backend_dir = dir.join("backend");
     std::fs::create_dir_all(&backend_dir).ok();
 
-    update_status(
-        app,
-        "downloading",
-        "Downloading backend from GitHub\u{2026}",
-        5,
-    );
+    update_status(app, "installing", "Installing backend\u{2026}", 5);
 
     let binary_name = backend_binary_name();
     let binary_path = backend_dir.join(binary_name);
-    let url = backend_download_url(env!("CARGO_PKG_VERSION"));
 
-    if !download_file(&url, &binary_path, app) {
+    let resource_path = app
+        .path()
+        .resource_dir()
+        .unwrap_or_else(|_| PathBuf::from("."))
+        .join("backend")
+        .join(binary_name);
+
+    if !resource_path.exists() {
+        update_status(
+            app,
+            "error",
+            &format!(
+                "Backend binary not found at {}. The installer may be corrupted.",
+                resource_path.display()
+            ),
+            0,
+        );
+        return false;
+    }
+
+    if std::fs::copy(&resource_path, &binary_path).is_err() {
+        update_status(
+            app,
+            "error",
+            "Failed to copy backend binary from installer resources.",
+            0,
+        );
         return false;
     }
 
