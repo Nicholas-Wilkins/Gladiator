@@ -149,26 +149,37 @@ fn data_dir() -> PathBuf {
 
 fn download_file(url: &str, dest: &PathBuf, app: &tauri::AppHandle) -> bool {
     let result = cmd("curl")
-        .args(["-L", "-o", &dest.to_string_lossy(), url])
+        .args(["-f", "-L", "-o", &dest.to_string_lossy(), url])
         .output();
 
-    match result {
-        Ok(out) if out.status.success() => true,
+    let ok = match result {
+        Ok(out) if out.status.success() => {
+            if let Ok(meta) = std::fs::metadata(dest) {
+                meta.len() > 1_000_000
+            } else {
+                false
+            }
+        }
         Ok(out) => {
             let stderr = String::from_utf8_lossy(&out.stderr);
-            update_status(
-                app,
-                "error",
-                &format!("Download failed:\n{}", stderr.trim()),
-                0,
+            let msg = format!(
+                "curl failed ({}): {}",
+                out.status.code().map(|c| c.to_string()).unwrap_or_default(),
+                stderr.trim()
             );
+            update_status(app, "error", &msg, 0);
             false
         }
         Err(e) => {
             update_status(app, "error", &format!("Failed to run curl: {}", e), 0);
             false
         }
+    };
+
+    if !ok {
+        let _ = std::fs::remove_file(dest);
     }
+    ok
 }
 
 // ── Windows: download and run pre-built PyInstaller binary ──────
@@ -200,6 +211,9 @@ fn is_backend_installed(dir: &PathBuf) -> bool {
     }
     let backend_path = dir.join("backend").join(backend_binary_name());
     backend_path.exists()
+        && std::fs::metadata(&backend_path)
+            .map(|m| m.len() > 1_000_000)
+            .unwrap_or(false)
 }
 
 #[cfg(target_os = "windows")]
