@@ -268,10 +268,26 @@ fn install_backend(dir: &PathBuf, app: &tauri::AppHandle) -> bool {
         return false;
     }
 
-    // Retry copy up to 5 times with delay — Windows Defender / antivirus
-    // may temporarily lock a freshly-extracted resource file.
+    // Windows Defender / antivirus may lock a freshly-extracted resource
+    // file for several seconds.  Wait for the source to become readable,
+    // then do the copy (up to 20 attempts, 2 s apart = 40 s budget).
     let mut last_err = String::new();
-    for attempt in 1..=5 {
+    for attempt in 1..=20 {
+        // Lightweight check: can we open the source for reading?
+        match std::fs::OpenOptions::new().read(true).open(&resource_path) {
+            Ok(f) => drop(f),
+            Err(e) => {
+                last_err = format!("{}", e);
+                eprintln!(
+                    "[gladiator-gui] Source not accessible (attempt {}/20): {}",
+                    attempt, last_err
+                );
+                std::thread::sleep(std::time::Duration::from_secs(2));
+                continue;
+            }
+        }
+
+        // Source is readable — attempt the copy.
         match std::fs::copy(&resource_path, &binary_path) {
             Ok(_) => {
                 last_err.clear();
@@ -280,12 +296,10 @@ fn install_backend(dir: &PathBuf, app: &tauri::AppHandle) -> bool {
             Err(e) => {
                 last_err = format!("{}", e);
                 eprintln!(
-                    "[gladiator-gui] Copy attempt {}/5 failed: {}",
+                    "[gladiator-gui] Copy attempt {}/20 failed: {}",
                     attempt, last_err
                 );
-                if attempt < 5 {
-                    std::thread::sleep(std::time::Duration::from_millis(1000));
-                }
+                std::thread::sleep(std::time::Duration::from_secs(2));
             }
         }
     }
@@ -295,7 +309,7 @@ fn install_backend(dir: &PathBuf, app: &tauri::AppHandle) -> bool {
             app,
             "error",
             &format!(
-                "Failed to copy backend binary from installer resources (after 5 attempts): {}",
+                "Failed to copy backend binary from installer resources: {}",
                 last_err
             ),
             0,
