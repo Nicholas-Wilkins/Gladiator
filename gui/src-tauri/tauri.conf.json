@@ -1,6 +1,6 @@
 {
   "productName": "Gladiator",
-  "version": "0.1.34",
+  "version": "0.1.36",
   "identifier": "com.gladiator.gui",
   "build": {
     "frontendDist": "../src",

@@ -153,61 +153,49 @@ fn download_file(url: &str, dest: &PathBuf, app: &tauri::AppHandle) -> bool {
     let tmp = dest.with_extension("tmp");
     let _ = std::fs::remove_file(&tmp);
 
-    let result = cmd("curl")
-        .args([
-            "-f",
-            "-L",
-            "--connect-timeout",
-            "30",
-            "--max-time",
-            "600",
-            "--retry",
-            "3",
-            "--retry-delay",
-            "5",
-            "-o",
-            &tmp.to_string_lossy(),
-            url,
-        ])
-        .output();
+    let result = (|| -> Result<(), String> {
+        let agent = ureq::AgentBuilder::new()
+            .timeout_connect(std::time::Duration::from_secs(30))
+            .timeout(std::time::Duration::from_secs(600))
+            .build();
 
-    let ok = match result {
-        Ok(out) if out.status.success() => {
-            if let Ok(meta) = std::fs::metadata(&tmp) {
-                if meta.len() > 1_000_000 {
-                    std::fs::rename(&tmp, dest).is_ok()
-                } else {
-                    let msg = format!(
-                        "Downloaded backend is too small ({} bytes). The release asset may be missing or corrupted.",
-                        meta.len()
-                    );
-                    update_status(app, "error", &msg, 0);
-                    false
-                }
-            } else {
-                false
-            }
+        let response = agent
+            .get(url)
+            .call()
+            .map_err(|e| format!("Download failed: {e}"))?;
+
+        let mut out =
+            std::fs::File::create(&tmp).map_err(|e| format!("Failed to create temp file: {e}"))?;
+
+        let mut reader = response.into_reader();
+        std::io::copy(&mut reader, &mut out)
+            .map_err(|e| format!("Failed to write response to file: {e}"))?;
+
+        drop(out);
+
+        let len = std::fs::metadata(&tmp)
+            .map_err(|e| format!("Failed to stat temp file: {e}"))?
+            .len();
+
+        if len <= 1_000_000 {
+            return Err(format!(
+                "Downloaded backend is too small ({len} bytes). The release asset may be missing or corrupted."
+            ));
         }
-        Ok(out) => {
-            let stderr = String::from_utf8_lossy(&out.stderr);
-            let msg = format!(
-                "curl failed ({}): {}",
-                out.status.code().map(|c| c.to_string()).unwrap_or_default(),
-                stderr.trim()
-            );
+
+        std::fs::rename(&tmp, dest).map_err(|e| format!("Failed to rename temp file: {e}"))?;
+
+        Ok(())
+    })();
+
+    match result {
+        Ok(()) => true,
+        Err(msg) => {
             update_status(app, "error", &msg, 0);
+            let _ = std::fs::remove_file(&tmp);
             false
         }
-        Err(e) => {
-            update_status(app, "error", &format!("Failed to run curl: {}", e), 0);
-            false
-        }
-    };
-
-    if !ok {
-        let _ = std::fs::remove_file(&tmp);
     }
-    ok
 }
 
 // ── Windows: download and run pre-built PyInstaller binary ──────
