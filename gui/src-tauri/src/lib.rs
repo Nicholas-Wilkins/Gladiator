@@ -183,7 +183,12 @@ fn download_file(url: &str, dest: &PathBuf, app: &tauri::AppHandle) -> bool {
             ));
         }
 
-        std::fs::rename(&tmp, dest).map_err(|e| format!("Failed to rename temp file: {e}"))?;
+        // Try rename first (atomic); fall back to copy+delete if the
+        // file is locked by antivirus scanning (common on Windows).
+        if std::fs::rename(&tmp, dest).is_err() {
+            std::fs::copy(&tmp, dest).map_err(|e| format!("Failed to copy temp file: {e}"))?;
+            let _ = std::fs::remove_file(&tmp);
+        }
 
         Ok(())
     })();
