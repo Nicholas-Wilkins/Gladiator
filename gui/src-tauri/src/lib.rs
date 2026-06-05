@@ -148,14 +148,23 @@ fn data_dir() -> PathBuf {
 }
 
 fn download_file(url: &str, dest: &PathBuf, app: &tauri::AppHandle) -> bool {
+    let _ = std::fs::remove_file(dest);
+
+    let tmp = dest.with_extension("tmp");
+    let _ = std::fs::remove_file(&tmp);
+
     let result = cmd("curl")
-        .args(["-f", "-L", "-o", &dest.to_string_lossy(), url])
+        .args(["-f", "-L", "-o", &tmp.to_string_lossy(), url])
         .output();
 
     let ok = match result {
         Ok(out) if out.status.success() => {
-            if let Ok(meta) = std::fs::metadata(dest) {
-                meta.len() > 1_000_000
+            if let Ok(meta) = std::fs::metadata(&tmp) {
+                if meta.len() > 1_000_000 {
+                    std::fs::rename(&tmp, dest).is_ok()
+                } else {
+                    false
+                }
             } else {
                 false
             }
@@ -177,7 +186,7 @@ fn download_file(url: &str, dest: &PathBuf, app: &tauri::AppHandle) -> bool {
     };
 
     if !ok {
-        let _ = std::fs::remove_file(dest);
+        let _ = std::fs::remove_file(&tmp);
     }
     ok
 }
