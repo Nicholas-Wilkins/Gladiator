@@ -63,7 +63,8 @@ jobs:
         shell: bash
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
-          echo "Setting tauri.conf.json version to $VERSION"
+          echo "Setting version to $VERSION"
+          sed -i "s/^version = .*/version = \"$VERSION\"/" Cargo.toml
           node -e "
             const fs = require('fs');
             const c = JSON.parse(fs.readFileSync('tauri.conf.json', 'utf8'));
