@@ -282,7 +282,7 @@ fn start_production_server(app_handle: &tauri::AppHandle) {
         }
     };
 
-    let deadline = Instant::now() + Duration::from_secs(30);
+    let deadline = Instant::now() + Duration::from_secs(120);
     let addr = "127.0.0.1:8742";
     let mut ready = false;
 
@@ -338,14 +338,28 @@ fn start_production_server(app_handle: &tauri::AppHandle) {
         *app_handle.state::<ApiProcess>().0.lock().unwrap() = Some(child);
         update_status(app_handle, "ready", "Ready!", 100);
     } else {
+        let mut stderr_buf = String::new();
+        if let Some(mut stderr_pipe) = child.stderr.take() {
+            let _ = stderr_pipe.read_to_string(&mut stderr_buf);
+        }
         let _ = child.kill();
         let _ = child.wait();
-        update_status(
-            app_handle,
-            "error",
-            "Backend did not start within 30 seconds",
-            0,
-        );
+        let stderr = stderr_buf.trim();
+        if stderr.is_empty() {
+            update_status(
+                app_handle,
+                "error",
+                "Backend did not start within 2 minutes. Check antivirus or try reinstalling.",
+                0,
+            );
+        } else {
+            update_status(
+                app_handle,
+                "error",
+                &format!("Backend failed to start:\n{}", stderr),
+                0,
+            );
+        }
     }
 }
 
