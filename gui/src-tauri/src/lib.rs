@@ -233,7 +233,15 @@ fn install_backend(dir: &PathBuf, app: &tauri::AppHandle) -> bool {
     eprintln!("[gladiator-gui] Installing backend to {}", dir.display());
 
     let backend_dir = dir.join("backend");
-    std::fs::create_dir_all(&backend_dir).ok();
+    if let Err(e) = std::fs::create_dir_all(&backend_dir) {
+        update_status(
+            app,
+            "error",
+            &format!("Failed to create backend directory: {}", e),
+            0,
+        );
+        return false;
+    }
 
     update_status(app, "installing", "Installing backend\u{2026}", 5);
 
@@ -260,11 +268,36 @@ fn install_backend(dir: &PathBuf, app: &tauri::AppHandle) -> bool {
         return false;
     }
 
-    if std::fs::copy(&resource_path, &binary_path).is_err() {
+    // Retry copy up to 5 times with delay — Windows Defender / antivirus
+    // may temporarily lock a freshly-extracted resource file.
+    let mut last_err = String::new();
+    for attempt in 1..=5 {
+        match std::fs::copy(&resource_path, &binary_path) {
+            Ok(_) => {
+                last_err.clear();
+                break;
+            }
+            Err(e) => {
+                last_err = format!("{}", e);
+                eprintln!(
+                    "[gladiator-gui] Copy attempt {}/5 failed: {}",
+                    attempt, last_err
+                );
+                if attempt < 5 {
+                    std::thread::sleep(std::time::Duration::from_millis(1000));
+                }
+            }
+        }
+    }
+
+    if !last_err.is_empty() {
         update_status(
             app,
             "error",
-            "Failed to copy backend binary from installer resources.",
+            &format!(
+                "Failed to copy backend binary from installer resources (after 5 attempts): {}",
+                last_err
+            ),
             0,
         );
         return false;

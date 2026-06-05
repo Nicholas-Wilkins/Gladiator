@@ -254,7 +254,10 @@ async def create_session(body: dict):
 
             worker_seed = (seed or 0) + i if seed is not None else None
 
-            cmd = [python, "--worker", engine, "--no-ui", "--db", db_path]
+            if getattr(sys, 'frozen', False):
+                cmd = [python, "--worker", engine, "--no-ui", "--db", db_path]
+            else:
+                cmd = [python, __file__, "--worker", engine, "--no-ui", "--db", db_path]
             if worker_seed is not None:
                 cmd.extend(["--seed", str(worker_seed)])
             if max_games is not None:
@@ -381,7 +384,10 @@ async def export_bot(body: dict):
     output = body.get("output")
 
     python = sys.executable
-    cmd = [python, "--export", "--engine", engine, "--db", db_path]
+    if getattr(sys, 'frozen', False):
+        cmd = [python, "--export", "--engine", engine, "--db", db_path]
+    else:
+        cmd = [python, __file__, "--export", "--engine", engine, "--db", db_path]
     if bot_id:
         cmd.extend(["--bot-id", bot_id])
     if output:
@@ -405,7 +411,10 @@ async def promote_bot(body: dict):
     bot_id = body.get("bot_id")
 
     python = sys.executable
-    cmd = [python, "--promote", "--engine", engine, "--db", db_path]
+    if getattr(sys, 'frozen', False):
+        cmd = [python, "--promote", "--engine", engine, "--db", db_path]
+    else:
+        cmd = [python, __file__, "--promote", "--engine", engine, "--db", db_path]
     if bot_id:
         cmd.extend(["--bot-id", bot_id])
 
