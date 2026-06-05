@@ -104,7 +104,12 @@ function renderBoard(board, compact) {
   board.rows.forEach((row, ri) => {
     row.forEach((cell, ci) => {
       const dark = (ri + ci) % 2 === 1;
-      html += `<div class="sq ${dark ? "sd" : "sl"}">${cell ? escapeHtml(cell) : ""}</div>`;
+      if (cell) {
+        const isWhite = "♔♕♖♗♘♙".includes(cell);
+        html += `<div class="sq ${dark ? "sd" : "sl"}"><span class="${isWhite ? "pw" : "pb"}">${escapeHtml(cell)}</span></div>`;
+      } else {
+        html += `<div class="sq ${dark ? "sd" : "sl"}"></div>`;
+      }
     });
   });
   html += "</div>";
