@@ -154,7 +154,21 @@ fn download_file(url: &str, dest: &PathBuf, app: &tauri::AppHandle) -> bool {
     let _ = std::fs::remove_file(&tmp);
 
     let result = cmd("curl")
-        .args(["-f", "-L", "-o", &tmp.to_string_lossy(), url])
+        .args([
+            "-f",
+            "-L",
+            "--connect-timeout",
+            "30",
+            "--max-time",
+            "600",
+            "--retry",
+            "3",
+            "--retry-delay",
+            "5",
+            "-o",
+            &tmp.to_string_lossy(),
+            url,
+        ])
         .output();
 
     let ok = match result {
@@ -163,6 +177,11 @@ fn download_file(url: &str, dest: &PathBuf, app: &tauri::AppHandle) -> bool {
                 if meta.len() > 1_000_000 {
                     std::fs::rename(&tmp, dest).is_ok()
                 } else {
+                    let msg = format!(
+                        "Downloaded backend is too small ({} bytes). The release asset may be missing or corrupted.",
+                        meta.len()
+                    );
+                    update_status(app, "error", &msg, 0);
                     false
                 }
             } else {
