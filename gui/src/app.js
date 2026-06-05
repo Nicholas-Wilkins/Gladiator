@@ -4,6 +4,7 @@ let currentPage = "dashboard";
 let setupResolved = false;
 let setupReadyReceived = false;
 let wsConnected = false;
+let _stoppingSessions = new Set();
 
 // ---------------------------------------------------------------------------
 // Setup overlay (shown during first-launch backend installation)
@@ -219,7 +220,13 @@ function renderSessionList(sessions) {
   el.innerHTML = sessions.map(s => {
     const data = s.champion || {};
     const isRunning = s.status === "running";
+    const isStopping = _stoppingSessions.has(s.id);
     const wid = s.worker_id !== null && s.worker_id !== undefined ? `W${s.worker_id + 1}` : "";
+    const actionHtml = isStopping
+      ? '<span style="color:var(--yellow);font-size:12px">Stopping\u2026</span>'
+      : isRunning
+        ? `<button class="btn stop-session" data-sid="${s.id}">Stop</button>`
+        : '<span style="color:var(--text-dim);font-size:12px">Stopped</span>';
     return `<div class="session-item">
       <div class="session-board">
         ${renderBoard(s.board, true)}
@@ -228,20 +235,27 @@ function renderSessionList(sessions) {
         <div class="name">${escapeHtml(s.engine)} ${wid} <span style="color:var(--text-dim);font-weight:400;font-size:12px">PID ${s.pid}</span></div>
         <div class="meta">${isRunning ? "RUNNING" : "STOPPED"} &middot; Gen ${data.generation ?? "?"} &middot; ${data.mode || "?"} &middot; ${data.total_matches ?? 0} matches &middot; ${data.consecutive_wins ?? 0} streak</div>
       </div>
-      <div class="actions">
-        ${isRunning ? `<button class="btn stop-session" data-sid="${s.id}">Stop</button>` : '<span style="color:var(--text-dim);font-size:12px">Stopped</span>'}
-      </div>
+      <div class="actions">${actionHtml}</div>
     </div>`;
   }).join("");
 
   $$(".stop-session").forEach(btn => {
     btn.addEventListener("click", async () => {
       const sid = btn.dataset.sid;
+      if (_stoppingSessions.has(sid)) return;
+      _stoppingSessions.add(sid);
+      btn.disabled = true;
+      btn.textContent = "Stopping\u2026";
       await api("POST", `/api/sessions/${sid}/stop`);
       toast("Session stopping...", "info");
       refreshDashboard();
     });
   });
+  // Clear sessions from _stoppingSessions once they are no longer in the list
+  const active = new Set(sessions.map(s => s.id));
+  for (const sid of _stoppingSessions) {
+    if (!active.has(sid)) _stoppingSessions.delete(sid);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -265,22 +279,31 @@ async function refreshTrainingSessions() {
   el.innerHTML = sessions.map(s => {
     const data = s.champion || {};
     const isRunning = s.status === "running";
+    const isStopping = _stoppingSessions.has(s.id);
     const wid = s.worker_id !== null && s.worker_id !== undefined ? `Worker ${s.worker_id + 1}` : "";
+    const actionHtml = isStopping
+      ? '<span style="color:var(--yellow);font-size:12px">Stopping\u2026</span>'
+      : isRunning
+        ? `<button class="btn stop-session" data-sid="${s.id}">Stop</button>`
+        : '<span style="color:var(--text-dim);font-size:12px">Stopped</span>';
     return `<div class="session-item">
       <div class="session-board">${renderBoard(s.board, false)}</div>
       <div class="info">
         <div class="name">${escapeHtml(s.engine)} ${wid} <span style="color:var(--text-dim);font-weight:400;font-size:12px">PID ${s.pid}</span></div>
         <div class="meta">${isRunning ? "RUNNING" : "STOPPED"} &middot; Gen ${data.generation ?? "?"} &middot; ${data.mode || "?"} &middot; ${data.total_matches ?? 0} matches &middot; ${data.consecutive_wins ?? 0} streak</div>
       </div>
-      <div class="actions">
-        ${isRunning ? `<button class="btn stop-session" data-sid="${s.id}">Stop</button>` : '<span style="color:var(--text-dim);font-size:12px">Stopped</span>'}
-      </div>
+      <div class="actions">${actionHtml}</div>
     </div>`;
   }).join("");
 
   $$("#training-session-list .stop-session").forEach(btn => {
     btn.addEventListener("click", async () => {
-      await api("POST", `/api/sessions/${btn.dataset.sid}/stop`);
+      const sid = btn.dataset.sid;
+      if (_stoppingSessions.has(sid)) return;
+      _stoppingSessions.add(sid);
+      btn.disabled = true;
+      btn.textContent = "Stopping\u2026";
+      await api("POST", `/api/sessions/${sid}/stop`);
       toast("Session stopping...", "info");
       refreshTrainingSessions();
     });
