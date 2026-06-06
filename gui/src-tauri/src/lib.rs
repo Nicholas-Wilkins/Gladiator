@@ -269,20 +269,17 @@ fn can_import(python: &PathBuf, module: &str) -> bool {
 }
 
 #[cfg(target_os = "windows")]
-fn extract_zip(
-    python: &PathBuf,
-    zip_path: &PathBuf,
-    dest: &PathBuf,
-    app: &tauri::AppHandle,
-) -> bool {
+fn extract_zip(zip_path: &PathBuf, dest: &PathBuf, app: &tauri::AppHandle) -> bool {
     let _ = std::fs::create_dir_all(dest);
-    let result = cmd(&python.to_string_lossy())
+    let result = cmd("powershell")
         .args([
-            "-m",
-            "zipfile",
-            "-e",
-            &zip_path.to_string_lossy(),
-            &dest.to_string_lossy(),
+            "-NoProfile",
+            "-Command",
+            &format!(
+                "Expand-Archive -Path '{}' -DestinationPath '{}' -Force",
+                zip_path.to_string_lossy(),
+                dest.to_string_lossy()
+            ),
         ])
         .output();
 
@@ -302,7 +299,7 @@ fn extract_zip(
             update_status(
                 app,
                 "error",
-                &format!("Failed to run python zipfile: {}", e),
+                &format!("Failed to run PowerShell Expand-Archive: {}", e),
                 0,
             );
             false
@@ -420,10 +417,14 @@ fn is_backend_installed(dir: &PathBuf) -> bool {
         }
     }
     let py = venv_python(&dir.join(".venv"));
-    if !py.exists() {
-        return false;
+    if py.exists() {
+        return can_import(&py, "fastapi");
     }
-    can_import(&py, "fastapi")
+    let ep = dir.join("embed_python").join("python.exe");
+    if ep.exists() {
+        return can_import(&ep, "fastapi");
+    }
+    false
 }
 
 #[cfg(target_os = "windows")]
@@ -513,97 +514,157 @@ fn install_backend(dir: &PathBuf, app: &tauri::AppHandle) -> bool {
         return false;
     }
 
-    update_status(app, "venv", "Setting up Python environment\u{2026}", 30);
-
-    let venv_dir = dir.join(".venv");
-    let py_name = python_name();
-    let py_path = PathBuf::from(&py_name);
-    if !python_stdlib_ok(&py_path) {
-        update_status(
-            app,
-            "error",
-            &format!(
-                "Python was not found. Make sure Python is installed and on the PATH.\n\
-                 Tried: '{}', 'python', 'py'",
-                py_name
-            ),
-            0,
-        );
-        try_restore_user_data(&backup, &old_backend);
-        return false;
-    }
-
-    // Create the virtual environment.
-    let mut venv_cmd = cmd(&py_name);
-    venv_cmd.args(["-m", "venv", &venv_dir.to_string_lossy()]);
-    venv_cmd.env_remove("PYTHONHOME");
-    match venv_cmd.output() {
-        Ok(out) if out.status.success() => {}
-        Ok(out) => {
-            let stderr = String::from_utf8_lossy(&out.stderr);
-            update_status(
-                app,
-                "error",
-                &format!(
-                    "Failed to create Python virtual environment:\n{}",
-                    stderr.trim()
-                ),
-                0,
-            );
-            try_restore_user_data(&backup, &old_backend);
-            return false;
-        }
-        Err(e) => {
-            update_status(
-                app,
-                "error",
-                &format!("Failed to run Python ({}): {}", py_name, e),
-                0,
-            );
-            try_restore_user_data(&backup, &old_backend);
-            return false;
-        }
-    }
-
-    let python_bin = venv_python(&venv_dir);
-    if !python_bin.exists() {
-        let bin_dir = venv_dir.join("Scripts");
-        let contents = match std::fs::read_dir(&bin_dir) {
-            Ok(entries) => entries
-                .filter_map(|e| e.ok().map(|e| e.file_name().to_string_lossy().to_string()))
-                .collect::<Vec<_>>()
-                .join(", "),
-            Err(_) => "directory not found".to_string(),
-        };
-        update_status(
-            app,
-            "error",
-            &format!(
-                "Virtual environment created but no Python binary found in {}.\nContents: {}",
-                bin_dir.display(),
-                contents
-            ),
-            0,
-        );
-        try_restore_user_data(&backup, &old_backend);
-        return false;
-    }
-
     // Extract the source bundle into the backend directory.
-    update_status(app, "extracting", "Extracting backend\u{2026}", 40);
+    update_status(app, "extracting", "Extracting backend\u{2026}", 30);
     let backend_dir = dir.join("backend");
     let _ = std::fs::remove_dir_all(&backend_dir);
-    if !extract_zip(&python_bin, &zip_path, &backend_dir, app) {
+    if !extract_zip(&zip_path, &backend_dir, app) {
         try_restore_user_data(&backup, &old_backend);
         return false;
     }
     let _ = std::fs::remove_file(&zip_path);
     try_restore_user_data(&backup, &backend_dir);
 
+    // Find or set up Python.
+    update_status(app, "venv", "Setting up Python environment\u{2026}", 40);
+
+    let venv_dir = dir.join(".venv");
+    let py_name = python_name();
+    let py_path = PathBuf::from(&py_name);
+    let (python_bin, using_venv) = if python_stdlib_ok(&py_path) {
+        // System Python available — create a virtual environment.
+        let mut venv_cmd = cmd(&py_name);
+        venv_cmd.args(["-m", "venv", &venv_dir.to_string_lossy()]);
+        venv_cmd.env_remove("PYTHONHOME");
+        match venv_cmd.output() {
+            Ok(out) if out.status.success() => {}
+            Ok(out) => {
+                let stderr = String::from_utf8_lossy(&out.stderr);
+                update_status(
+                    app,
+                    "error",
+                    &format!("Failed to create virtual environment:\n{}", stderr.trim()),
+                    0,
+                );
+                try_restore_user_data(&backup, &old_backend);
+                return false;
+            }
+            Err(e) => {
+                update_status(
+                    app,
+                    "error",
+                    &format!("Failed to run Python ({}): {}", py_name, e),
+                    0,
+                );
+                try_restore_user_data(&backup, &old_backend);
+                return false;
+            }
+        }
+
+        let vb = venv_python(&venv_dir);
+        if !vb.exists() {
+            update_status(
+                app,
+                "error",
+                &format!(
+                    "Virtual env created but no python.exe found in {}",
+                    venv_dir.join("Scripts").display()
+                ),
+                0,
+            );
+            try_restore_user_data(&backup, &old_backend);
+            return false;
+        }
+        (vb, true)
+    } else {
+        // No system Python — use bundled embedded Python.
+        eprintln!("[gladiator-gui] System Python not found, using bundled embedded Python");
+        let embed_zip = app
+            .path()
+            .resource_dir()
+            .unwrap_or_else(|_| PathBuf::from("."))
+            .join("backend")
+            .join("embed_python.zip");
+        if !embed_zip.exists() {
+            update_status(
+                app,
+                "error",
+                "Python was not found on this system, and the bundled embedded Python\n\
+                 is missing from the installer.  Install Python from python.org and re-launch.",
+                0,
+            );
+            try_restore_user_data(&backup, &old_backend);
+            return false;
+        }
+
+        let embed_dir = dir.join("embed_python");
+        let _ = std::fs::remove_dir_all(&embed_dir);
+        if !extract_zip(&embed_zip, &embed_dir, app) {
+            try_restore_user_data(&backup, &old_backend);
+            return false;
+        }
+
+        let eb = embed_dir.join("python.exe");
+        if !eb.exists() {
+            update_status(
+                app,
+                "error",
+                &format!(
+                    "Extracted embedded Python but python.exe not found in {}",
+                    embed_dir.display()
+                ),
+                0,
+            );
+            try_restore_user_data(&backup, &old_backend);
+            return false;
+        }
+
+        // Bootstrap pip into the embedded Python.
+        update_status(app, "pip", "Bootstrapping pip\u{2026}", 50);
+        let get_pip_url = "https://bootstrap.pypa.io/get-pip.py";
+        let get_pip_path = dir.join("get-pip.py");
+        if !download_file(get_pip_url, &get_pip_path, app) {
+            try_restore_user_data(&backup, &old_backend);
+            return false;
+        }
+        let pip_out = cmd(&eb.to_string_lossy()).arg(&get_pip_path).output();
+        let _ = std::fs::remove_file(&get_pip_path);
+        match pip_out {
+            Ok(out) if out.status.success() => {}
+            Ok(out) => {
+                let stderr = String::from_utf8_lossy(&out.stderr);
+                update_status(
+                    app,
+                    "error",
+                    &format!("Failed to bootstrap pip:\n{}", stderr.trim()),
+                    0,
+                );
+                try_restore_user_data(&backup, &old_backend);
+                return false;
+            }
+            Err(e) => {
+                update_status(
+                    app,
+                    "error",
+                    &format!("Failed to run embedded Python: {}", e),
+                    0,
+                );
+                try_restore_user_data(&backup, &old_backend);
+                return false;
+            }
+        }
+        (eb, false)
+    };
+
     // Install pip dependencies from requirements.txt.
-    update_status(app, "deps", "Installing Python packages\u{2026}", 55);
+    update_status(app, "deps", "Installing Python packages\u{2026}", 65);
     let req_path = backend_dir.join("requirements.txt");
-    let mut pip_req = cmd(&venv_pip(&venv_dir).to_string_lossy());
+    let pip_path = if using_venv {
+        venv_pip(&venv_dir)
+    } else {
+        dir.join("embed_python").join("Scripts").join("pip.exe")
+    };
+    let mut pip_req = cmd(&pip_path.to_string_lossy());
     pip_req.args(["install", "-r", &req_path.to_string_lossy()]);
     pip_req.env_remove("PYTHONHOME");
     match pip_req.output() {
@@ -629,9 +690,9 @@ fn install_backend(dir: &PathBuf, app: &tauri::AppHandle) -> bool {
         app,
         "torch",
         "Detecting GPU and installing PyTorch\u{2026}",
-        75,
+        80,
     );
-    let mut torch_cmd = cmd(&venv_python(&venv_dir).to_string_lossy());
+    let mut torch_cmd = cmd(&python_bin.to_string_lossy());
     torch_cmd.arg(backend_dir.join("install.py"));
     torch_cmd.current_dir(&backend_dir);
     torch_cmd.env_remove("PYTHONHOME");
@@ -683,15 +744,20 @@ fn start_production_server(app_handle: &tauri::AppHandle) {
 
     let venv_py = venv_python(&venv_dir);
     let system_py = PathBuf::from(python_name());
+    let embed_py = dir.join("embed_python").join("python.exe");
     let mut sp = find_venv_site_packages(&venv_dir);
 
     let venv_ok = venv_py.exists() && python_stdlib_ok(&venv_py);
     let sys_ok = python_stdlib_ok(&system_py);
+    let embed_ok = embed_py.exists() && python_stdlib_ok(&embed_py);
 
     let (bin, label) = if venv_ok {
         (venv_py, "venv")
+    } else if embed_ok {
+        eprintln!("[gladiator-gui] venv Python broken, using embedded Python");
+        (embed_py, "embed")
     } else if sys_ok {
-        eprintln!("[gladiator-gui] venv Python broken (stdlib check failed), using system python");
+        eprintln!("[gladiator-gui] venv/embed broken, using system Python");
         (system_py, "system")
     } else {
         let msg = "No working Python interpreter found. Make sure Python is installed and its standard library is intact.".to_string();
@@ -712,8 +778,21 @@ fn start_production_server(app_handle: &tauri::AppHandle) {
                 85,
             );
 
-            let installed = if venv_dir.join("Scripts").join("pip.exe").exists() {
+            let installed = if label == "venv" && venv_dir.join("Scripts").join("pip.exe").exists()
+            {
                 pip_install(&venv_dir, &["fastapi", "uvicorn[standard]"]).is_ok()
+            } else if label == "embed"
+                && dir
+                    .join("embed_python")
+                    .join("Scripts")
+                    .join("pip.exe")
+                    .exists()
+            {
+                let embed_pip = dir.join("embed_python").join("Scripts").join("pip.exe");
+                let mut c = cmd(&embed_pip.to_string_lossy());
+                c.args(["install", "fastapi", "uvicorn[standard]"]);
+                c.env_remove("PYTHONHOME");
+                c.output().map(|o| o.status.success()).unwrap_or(false)
             } else {
                 false
             };
@@ -724,6 +803,12 @@ fn start_production_server(app_handle: &tauri::AppHandle) {
                 pip_cmd.env_remove("PYTHONHOME");
                 if label == "venv" {
                     if let Some(sp) = find_venv_site_packages(&venv_dir) {
+                        pip_cmd.arg("--target");
+                        pip_cmd.arg(sp.to_string_lossy().to_string());
+                    }
+                } else if label == "embed" {
+                    let sp = dir.join("embed_python").join("Lib").join("site-packages");
+                    if sp.exists() {
                         pip_cmd.arg("--target");
                         pip_cmd.arg(sp.to_string_lossy().to_string());
                     }

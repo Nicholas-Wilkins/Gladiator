@@ -95,6 +95,14 @@ jobs:
             requirements.txt \
             gladiator/ gladiator_nn/ gladiator_mini/ gladiator_nn_mini/ || true
 
+      - name: Download embeddable Python (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: bash
+        run: |
+          curl -sSLo embed_python.zip \
+            https://www.python.org/ftp/python/3.11.9/python-3.11.9-embed-amd64.zip
+          mv embed_python.zip gui/src-tauri/backend/
+
       - name: Configure backend resource in tauri.conf.json
         if: matrix.os == 'windows-latest'
         shell: bash
@@ -103,7 +111,8 @@ jobs:
             const fs = require('fs');
             const c = JSON.parse(fs.readFileSync('gui/src-tauri/tauri.conf.json', 'utf8'));
             c.bundle.resources = {
-              'backend/gladiator-backend-windows.zip': 'backend/gladiator-backend-windows.zip'
+              'backend/gladiator-backend-windows.zip': 'backend/gladiator-backend-windows.zip',
+              'backend/embed_python.zip': 'backend/embed_python.zip'
             };
             fs.writeFileSync('gui/src-tauri/tauri.conf.json', JSON.stringify(c, null, 2) + '\n');
           "
