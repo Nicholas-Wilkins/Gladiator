@@ -105,9 +105,10 @@ function renderBoard(board, compact) {
   board.rows.forEach((row, ri) => {
     row.forEach((cell, ci) => {
       const dark = (ri + ci) % 2 === 1;
-      if (cell) {
-        const isWhite = "♔♕♖♗♘♙".includes(cell);
-        html += `<div class="sq ${dark ? "sd" : "sl"}"><span class="${isWhite ? "pw" : "pb"}">${escapeHtml(cell)}</span></div>`;
+      if (cell && cell.piece) {
+        const sym = cell.piece.symbol;
+        const color = cell.piece.color;
+        html += `<div class="sq ${dark ? "sd" : "sl"}"><span class="${color === "white" ? "pw" : "pb"}">${escapeHtml(sym)}</span></div>`;
       } else {
         html += `<div class="sq ${dark ? "sd" : "sl"}"></div>`;
       }

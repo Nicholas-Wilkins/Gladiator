@@ -93,7 +93,7 @@ jobs:
             gladiator_api.py main.py main_nn.py main_mini.py main_nn_mini.py \
             export_bot.py promote_bot.py install.py \
             requirements.txt \
-            gladiator/ gladiator_nn/ gladiator_mini/ gladiator_nn_mini/
+            gladiator/ gladiator_nn/ gladiator_mini/ gladiator_nn_mini/ || true
 
       - name: Configure backend resource in tauri.conf.json
         if: matrix.os == 'windows-latest'

@@ -78,10 +78,13 @@ def _board_to_grid(board: chess.Board | None) -> dict | None:
         for file in range(8):
             sq = chess.square(file, rank)
             piece = board.piece_at(sq)
+            cell: dict = {"piece": None, "sq": sq}
             if piece:
-                cells.append(_PIECE_SYMBOLS[(piece.piece_type, piece.color)])
-            else:
-                cells.append(None)
+                cell["piece"] = {
+                    "symbol": _PIECE_SYMBOLS[(piece.piece_type, piece.color)],
+                    "color": "white" if piece.color == chess.WHITE else "black",
+                }
+            cells.append(cell)
         rows.append(cells)
     return {"rows": rows, "turn": "white" if board.turn == chess.WHITE else "black", "fen": board.fen()}
 
