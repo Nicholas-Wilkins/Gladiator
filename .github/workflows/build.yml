@@ -144,61 +144,9 @@ jobs:
           name: ${{ matrix.artifact-name }}
           path: gui/src-tauri/target/release/bundle/
 
-  build-backend:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: windows-latest
-            artifact-name: gladiator-backend-x86_64-windows.exe
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      - name: Install Python dependencies
-        run: |
-          pip install -r requirements.txt
-          pip install pyinstaller
-          python install.py
-
-      - name: Build standalone backend
-        shell: bash
-        run: |
-          SEP=$([[ "${{ matrix.os }}" == "windows-latest" ]] && echo ";" || echo ":")
-          pyinstaller --onefile \
-            --name gladiator-backend \
-            --add-data "gladiator_nn${SEP}gladiator_nn" \
-            --add-data "gladiator_mini${SEP}gladiator_mini" \
-            --add-data "gladiator_nn_mini${SEP}gladiator_nn_mini" \
-            --hidden-import gladiator_nn \
-            --hidden-import gladiator_mini \
-            --hidden-import gladiator_nn_mini \
-            --hidden-import main \
-            --hidden-import main_nn \
-            --hidden-import main_mini \
-            --hidden-import main_nn_mini \
-            --hidden-import export_bot \
-            --hidden-import promote_bot \
-            gladiator_api.py
-
-      - name: Rename binary to match artifact name
-        shell: bash
-        run: |
-          mv dist/gladiator-backend* "dist/${{ matrix.artifact-name }}"
-
-      - name: Upload backend artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ matrix.artifact-name }}
-          path: dist/${{ matrix.artifact-name }}
-
   release:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [build, build-backend]
+    needs: [build]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -219,7 +167,7 @@ jobs:
 
           # Copy ALL installer/bundle files to a flat release dir
           mkdir -p release
-          find . -type f \( -name "*.deb" -o -name "*.AppImage" -o -name "*.dmg" -o -name "*.exe" -o -name "*.msi" -o -name "gladiator-backend-*" \) -exec cp {} release/ \;
+          find . -type f \( -name "*.deb" -o -name "*.AppImage" -o -name "*.dmg" -o -name "*.exe" -o -name "*.msi" \) -exec cp {} release/ \;
 
           # Re-structure into the layout scripts/release.sh expects, for signing
           mkdir -p bundle/appimage bundle/msi bundle/dmg
