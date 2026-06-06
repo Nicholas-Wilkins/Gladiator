@@ -84,35 +84,16 @@ jobs:
               '[http]\nretry = 5\ntimeout = 120\n');
           "
 
-      - uses: actions/setup-python@v5
-        if: matrix.os == 'windows-latest'
-        with:
-          python-version: "3.11"
-
-      - name: Build Windows backend
+      - name: Create backend source bundle (Windows)
         if: matrix.os == 'windows-latest'
         shell: bash
         run: |
-          pip install -r requirements.txt
-          pip install pyinstaller
-          python install.py
-          pyinstaller --onefile \
-            --name gladiator-backend \
-            --add-data "gladiator_nn;gladiator_nn" \
-            --add-data "gladiator_mini;gladiator_mini" \
-            --add-data "gladiator_nn_mini;gladiator_nn_mini" \
-            --hidden-import gladiator_nn \
-            --hidden-import gladiator_mini \
-            --hidden-import gladiator_nn_mini \
-            --hidden-import main \
-            --hidden-import main_nn \
-            --hidden-import main_mini \
-            --hidden-import main_nn_mini \
-            --hidden-import export_bot \
-            --hidden-import promote_bot \
-            gladiator_api.py
           mkdir -p gui/src-tauri/backend
-          cp dist/gladiator-backend.exe gui/src-tauri/backend/gladiator-backend-x86_64-windows.exe
+          zip gui/src-tauri/backend/gladiator-backend-windows.zip \
+            gladiator_api.py main.py main_nn.py main_mini.py main_nn_mini.py \
+            export_bot.py promote_bot.py install.py \
+            requirements.txt \
+            gladiator/ gladiator_nn/ gladiator_mini/ gladiator_nn_mini/
 
       - name: Configure backend resource in tauri.conf.json
         if: matrix.os == 'windows-latest'
@@ -122,7 +103,7 @@ jobs:
             const fs = require('fs');
             const c = JSON.parse(fs.readFileSync('gui/src-tauri/tauri.conf.json', 'utf8'));
             c.bundle.resources = {
-              'backend/gladiator-backend-x86_64-windows.exe': 'backend/gladiator-backend-x86_64-windows.exe'
+              'backend/gladiator-backend-windows.zip': 'backend/gladiator-backend-windows.zip'
             };
             fs.writeFileSync('gui/src-tauri/tauri.conf.json', JSON.stringify(c, null, 2) + '\n');
           "
