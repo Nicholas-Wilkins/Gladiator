@@ -101,9 +101,8 @@ jobs:
         run: |
           curl -sSLo uv-windows.zip \
             https://github.com/astral-sh/uv/releases/download/0.5.0/uv-x86_64-pc-windows-msvc.zip
-          7z x uv-windows.zip -otmp_uv -aoa
-          mv tmp_uv/uv-x86_64-pc-windows-msvc/uv.exe gui/src-tauri/backend/
-          rm -rf tmp_uv uv-windows.zip
+          7z e uv-windows.zip -ogui/src-tauri/backend/ uv.exe -aoa
+          rm -f uv-windows.zip
 
       - name: Configure backend resource in tauri.conf.json
         if: matrix.os == 'windows-latest'
