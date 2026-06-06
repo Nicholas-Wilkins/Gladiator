@@ -95,13 +95,15 @@ jobs:
             requirements.txt \
             gladiator/ gladiator_nn/ gladiator_mini/ gladiator_nn_mini/ || true
 
-      - name: Download embeddable Python (Windows)
+      - name: Download uv (Windows)
         if: matrix.os == 'windows-latest'
         shell: bash
         run: |
-          curl -sSLo embed_python.zip \
-            https://www.python.org/ftp/python/3.11.9/python-3.11.9-embed-amd64.zip
-          mv embed_python.zip gui/src-tauri/backend/
+          curl -sSLo uv-windows.zip \
+            https://github.com/astral-sh/uv/releases/download/0.5.0/uv-x86_64-pc-windows-msvc.zip
+          7z x uv-windows.zip -otmp_uv -aoa
+          mv tmp_uv/uv-x86_64-pc-windows-msvc/uv.exe gui/src-tauri/backend/
+          rm -rf tmp_uv uv-windows.zip
 
       - name: Configure backend resource in tauri.conf.json
         if: matrix.os == 'windows-latest'
@@ -112,7 +114,7 @@ jobs:
             const c = JSON.parse(fs.readFileSync('gui/src-tauri/tauri.conf.json', 'utf8'));
             c.bundle.resources = {
               'backend/gladiator-backend-windows.zip': 'backend/gladiator-backend-windows.zip',
-              'backend/embed_python.zip': 'backend/embed_python.zip'
+              'backend/uv.exe': 'backend/uv.exe'
             };
             fs.writeFileSync('gui/src-tauri/tauri.conf.json', JSON.stringify(c, null, 2) + '\n');
           "

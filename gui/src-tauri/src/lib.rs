@@ -211,11 +211,6 @@ fn venv_python(venv_dir: &PathBuf) -> PathBuf {
 }
 
 #[cfg(target_os = "windows")]
-fn venv_pip(venv_dir: &PathBuf) -> PathBuf {
-    venv_dir.join("Scripts").join("pip.exe")
-}
-
-#[cfg(target_os = "windows")]
 fn python_stdlib_ok(python: &PathBuf) -> bool {
     cmd(&python.to_string_lossy())
         .args(["-c", "import encodings"])
@@ -223,39 +218,6 @@ fn python_stdlib_ok(python: &PathBuf) -> bool {
         .output()
         .map(|o| o.status.success())
         .unwrap_or(false)
-}
-
-#[cfg(target_os = "windows")]
-fn python_name() -> String {
-    for name in &["python", "py"] {
-        if cmd(name)
-            .arg("--version")
-            .output()
-            .map(|o| o.status.success())
-            .unwrap_or(false)
-        {
-            return name.to_string();
-        }
-    }
-    "python".to_string()
-}
-
-#[cfg(target_os = "windows")]
-fn pip_install(venv_dir: &PathBuf, pkgs: &[&str]) -> Result<String, String> {
-    let mut c = cmd(&venv_pip(venv_dir).to_string_lossy());
-    c.args(["install"]);
-    c.args(pkgs);
-    c.env_remove("PYTHONHOME");
-    let out = c
-        .output()
-        .map_err(|e| format!("Failed to run pip: {}", e))?;
-    if out.status.success() {
-        let text = String::from_utf8_lossy(&out.stdout).trim().to_string();
-        Ok(text)
-    } else {
-        let stderr = String::from_utf8_lossy(&out.stderr);
-        Err(stderr.trim().to_string())
-    }
 }
 
 #[cfg(target_os = "windows")]
@@ -417,14 +379,7 @@ fn is_backend_installed(dir: &PathBuf) -> bool {
         }
     }
     let py = venv_python(&dir.join(".venv"));
-    if py.exists() {
-        return can_import(&py, "fastapi");
-    }
-    let ep = dir.join("embed_python").join("python.exe");
-    if ep.exists() {
-        return can_import(&ep, "fastapi");
-    }
-    false
+    py.exists() && can_import(&py, "fastapi")
 }
 
 #[cfg(target_os = "windows")]
@@ -515,7 +470,7 @@ fn install_backend(dir: &PathBuf, app: &tauri::AppHandle) -> bool {
     }
 
     // Extract the source bundle into the backend directory.
-    update_status(app, "extracting", "Extracting backend\u{2026}", 30);
+    update_status(app, "extracting", "Extracting backend\u{2026}", 15);
     let backend_dir = dir.join("backend");
     let _ = std::fs::remove_dir_all(&backend_dir);
     if !extract_zip(&zip_path, &backend_dir, app) {
@@ -525,162 +480,137 @@ fn install_backend(dir: &PathBuf, app: &tauri::AppHandle) -> bool {
     let _ = std::fs::remove_file(&zip_path);
     try_restore_user_data(&backup, &backend_dir);
 
-    // Find or set up Python.
-    update_status(app, "venv", "Setting up Python environment\u{2026}", 40);
+    // Copy uv.exe from installer resources.
+    let uv_path = dir.join("uv.exe");
+    let uv_resource = app
+        .path()
+        .resource_dir()
+        .unwrap_or_else(|_| PathBuf::from("."))
+        .join("backend")
+        .join("uv.exe");
+    if !uv_resource.exists() {
+        update_status(
+            app,
+            "error",
+            &format!(
+                "uv.exe not found at {}. The installer may be corrupted.",
+                uv_resource.display()
+            ),
+            0,
+        );
+        try_restore_user_data(&backup, &old_backend);
+        return false;
+    }
+    let mut last_err = String::new();
+    for attempt in 1..=10 {
+        match std::fs::OpenOptions::new().read(true).open(&uv_resource) {
+            Ok(f) => drop(f),
+            Err(e) => {
+                last_err = format!("{}", e);
+                eprintln!(
+                    "[gladiator-gui] uv.exe not accessible (attempt {}/10): {}",
+                    attempt, last_err
+                );
+                std::thread::sleep(std::time::Duration::from_secs(2));
+                continue;
+            }
+        }
+        match std::fs::copy(&uv_resource, &uv_path) {
+            Ok(_) => {
+                last_err.clear();
+                break;
+            }
+            Err(e) => {
+                last_err = format!("{}", e);
+                eprintln!(
+                    "[gladiator-gui] uv.exe copy attempt {}/10 failed: {}",
+                    attempt, last_err
+                );
+                std::thread::sleep(std::time::Duration::from_secs(2));
+            }
+        }
+    }
+    if !last_err.is_empty() {
+        update_status(
+            app,
+            "error",
+            &format!("Failed to copy uv.exe from resources: {}", last_err),
+            0,
+        );
+        try_restore_user_data(&backup, &old_backend);
+        return false;
+    }
 
+    // Create virtual environment with uv (downloads Python if needed).
+    update_status(app, "venv", "Creating virtual environment\u{2026}", 40);
     let venv_dir = dir.join(".venv");
-    let py_name = python_name();
-    let py_path = PathBuf::from(&py_name);
-    let (python_bin, using_venv) = if python_stdlib_ok(&py_path) {
-        // System Python available — create a virtual environment.
-        let mut venv_cmd = cmd(&py_name);
-        venv_cmd.args(["-m", "venv", &venv_dir.to_string_lossy()]);
-        venv_cmd.env_remove("PYTHONHOME");
-        match venv_cmd.output() {
-            Ok(out) if out.status.success() => {}
-            Ok(out) => {
-                let stderr = String::from_utf8_lossy(&out.stderr);
-                update_status(
-                    app,
-                    "error",
-                    &format!("Failed to create virtual environment:\n{}", stderr.trim()),
-                    0,
-                );
-                try_restore_user_data(&backup, &old_backend);
-                return false;
-            }
-            Err(e) => {
-                update_status(
-                    app,
-                    "error",
-                    &format!("Failed to run Python ({}): {}", py_name, e),
-                    0,
-                );
-                try_restore_user_data(&backup, &old_backend);
-                return false;
-            }
-        }
-
-        let vb = venv_python(&venv_dir);
-        if !vb.exists() {
-            update_status(
-                app,
-                "error",
-                &format!(
-                    "Virtual env created but no python.exe found in {}",
-                    venv_dir.join("Scripts").display()
-                ),
-                0,
-            );
-            try_restore_user_data(&backup, &old_backend);
-            return false;
-        }
-        (vb, true)
-    } else {
-        // No system Python — use bundled embedded Python.
-        eprintln!("[gladiator-gui] System Python not found, using bundled embedded Python");
-        let embed_zip = app
-            .path()
-            .resource_dir()
-            .unwrap_or_else(|_| PathBuf::from("."))
-            .join("backend")
-            .join("embed_python.zip");
-        if !embed_zip.exists() {
-            update_status(
-                app,
-                "error",
-                "Python was not found on this system, and the bundled embedded Python\n\
-                 is missing from the installer.  Install Python from python.org and re-launch.",
-                0,
-            );
-            try_restore_user_data(&backup, &old_backend);
-            return false;
-        }
-
-        let embed_dir = dir.join("embed_python");
-        let _ = std::fs::remove_dir_all(&embed_dir);
-        if !extract_zip(&embed_zip, &embed_dir, app) {
-            try_restore_user_data(&backup, &old_backend);
-            return false;
-        }
-
-        let eb = embed_dir.join("python.exe");
-        if !eb.exists() {
-            update_status(
-                app,
-                "error",
-                &format!(
-                    "Extracted embedded Python but python.exe not found in {}",
-                    embed_dir.display()
-                ),
-                0,
-            );
-            try_restore_user_data(&backup, &old_backend);
-            return false;
-        }
-
-        // Bootstrap pip into the embedded Python.
-        update_status(app, "pip", "Bootstrapping pip\u{2026}", 50);
-        let get_pip_url = "https://bootstrap.pypa.io/get-pip.py";
-        let get_pip_path = dir.join("get-pip.py");
-        if !download_file(get_pip_url, &get_pip_path, app) {
-            try_restore_user_data(&backup, &old_backend);
-            return false;
-        }
-        let pip_out = cmd(&eb.to_string_lossy()).arg(&get_pip_path).output();
-        let _ = std::fs::remove_file(&get_pip_path);
-        match pip_out {
-            Ok(out) if out.status.success() => {}
-            Ok(out) => {
-                let stderr = String::from_utf8_lossy(&out.stderr);
-                update_status(
-                    app,
-                    "error",
-                    &format!("Failed to bootstrap pip:\n{}", stderr.trim()),
-                    0,
-                );
-                try_restore_user_data(&backup, &old_backend);
-                return false;
-            }
-            Err(e) => {
-                update_status(
-                    app,
-                    "error",
-                    &format!("Failed to run embedded Python: {}", e),
-                    0,
-                );
-                try_restore_user_data(&backup, &old_backend);
-                return false;
-            }
-        }
-        (eb, false)
-    };
-
-    // Install pip dependencies from requirements.txt.
-    update_status(app, "deps", "Installing Python packages\u{2026}", 65);
-    let req_path = backend_dir.join("requirements.txt");
-    let pip_path = if using_venv {
-        venv_pip(&venv_dir)
-    } else {
-        dir.join("embed_python").join("Scripts").join("pip.exe")
-    };
-    let mut pip_req = cmd(&pip_path.to_string_lossy());
-    pip_req.args(["install", "-r", &req_path.to_string_lossy()]);
-    pip_req.env_remove("PYTHONHOME");
-    match pip_req.output() {
+    let mut venv_cmd = cmd(&uv_path.to_string_lossy());
+    venv_cmd.args(["venv", "--python", "3.11", &venv_dir.to_string_lossy()]);
+    venv_cmd.current_dir(&dir);
+    venv_cmd.env_remove("PYTHONHOME");
+    match venv_cmd.output() {
         Ok(out) if out.status.success() => {}
         Ok(out) => {
             let stderr = String::from_utf8_lossy(&out.stderr);
             update_status(
                 app,
                 "error",
-                &format!("Failed to install Python packages:\n{}", stderr.trim()),
+                &format!(
+                    "Failed to create virtual environment with uv:\n{}",
+                    stderr.trim()
+                ),
+                0,
+            );
+            try_restore_user_data(&backup, &old_backend);
+            return false;
+        }
+        Err(e) => {
+            update_status(app, "error", &format!("Failed to run uv: {}", e), 0);
+            try_restore_user_data(&backup, &old_backend);
+            return false;
+        }
+    }
+    let python_bin = venv_python(&venv_dir);
+    if !python_bin.exists() || !python_stdlib_ok(&python_bin) {
+        update_status(
+            app,
+            "error",
+            "uv created the virtual environment but the Python interpreter is not functional.",
+            0,
+        );
+        try_restore_user_data(&backup, &old_backend);
+        return false;
+    }
+
+    // Install pip dependencies from requirements.txt with uv.
+    update_status(app, "deps", "Installing Python packages\u{2026}", 60);
+    let req_path = backend_dir.join("requirements.txt");
+    let mut pip_cmd = cmd(&uv_path.to_string_lossy());
+    pip_cmd.args(["pip", "install", "-r", &req_path.to_string_lossy()]);
+    pip_cmd.current_dir(&dir);
+    pip_cmd.env_remove("PYTHONHOME");
+    match pip_cmd.output() {
+        Ok(out) if out.status.success() => {}
+        Ok(out) => {
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            update_status(
+                app,
+                "error",
+                &format!(
+                    "Failed to install Python packages with uv:\n{}",
+                    stderr.trim()
+                ),
                 0,
             );
             return false;
         }
         Err(e) => {
-            update_status(app, "error", &format!("Failed to run pip: {}", e), 0);
+            update_status(
+                app,
+                "error",
+                &format!("Failed to run uv pip install: {}", e),
+                0,
+            );
             return false;
         }
     }
@@ -732,6 +662,7 @@ fn install_backend(dir: &PathBuf, app: &tauri::AppHandle) -> bool {
 #[cfg(target_os = "windows")]
 fn start_production_server(app_handle: &tauri::AppHandle) {
     let dir = data_dir();
+    let uv_path = dir.join("uv.exe");
     let venv_dir = dir.join(".venv");
     let script = dir.join("backend").join("gladiator_api.py");
 
@@ -743,116 +674,100 @@ fn start_production_server(app_handle: &tauri::AppHandle) {
     );
 
     let venv_py = venv_python(&venv_dir);
-    let system_py = PathBuf::from(python_name());
-    let embed_py = dir.join("embed_python").join("python.exe");
-    let mut sp = find_venv_site_packages(&venv_dir);
 
-    let venv_ok = venv_py.exists() && python_stdlib_ok(&venv_py);
-    let sys_ok = python_stdlib_ok(&system_py);
-    let embed_ok = embed_py.exists() && python_stdlib_ok(&embed_py);
-
-    let (bin, label) = if venv_ok {
-        (venv_py, "venv")
-    } else if embed_ok {
-        eprintln!("[gladiator-gui] venv Python broken, using embedded Python");
-        (embed_py, "embed")
-    } else if sys_ok {
-        eprintln!("[gladiator-gui] venv/embed broken, using system Python");
-        (system_py, "system")
-    } else {
-        let msg = "No working Python interpreter found. Make sure Python is installed and its standard library is intact.".to_string();
-        update_status(app_handle, "error", &msg, 0);
-        return;
-    };
-
-    let site_pkgs = if label == "system" { sp.take() } else { None };
-
-    let python = &bin;
-    for mod_name in &["fastapi"] {
-        if !can_import(python, mod_name) {
-            eprintln!("[gladiator-gui] {} not importable, installing...", mod_name);
+    // Ensure the virtual environment is functional.
+    if !venv_py.exists() || !python_stdlib_ok(&venv_py) {
+        if uv_path.exists() {
+            eprintln!("[gladiator-gui] venv broken, recreating with uv");
+            let mut venv_cmd = cmd(&uv_path.to_string_lossy());
+            venv_cmd.args(["venv", "--python", "3.11", &venv_dir.to_string_lossy()]);
+            venv_cmd.current_dir(&dir);
+            venv_cmd.env_remove("PYTHONHOME");
+            match venv_cmd.output() {
+                Ok(out) if out.status.success() => {}
+                _ => {
+                    update_status(
+                        app_handle,
+                        "error",
+                        "Failed to recreate virtual environment with uv.",
+                        0,
+                    );
+                    return;
+                }
+            }
+        } else {
             update_status(
                 app_handle,
-                "deps",
-                "Installing missing Python packages\u{2026}",
-                85,
+                "error",
+                "No working Python virtual environment found and uv is not available.\n\
+                 Reinstall the application.",
+                0,
             );
+            return;
+        }
+    }
 
-            let installed = if label == "venv" && venv_dir.join("Scripts").join("pip.exe").exists()
-            {
-                pip_install(&venv_dir, &["fastapi", "uvicorn[standard]"]).is_ok()
-            } else if label == "embed"
-                && dir
-                    .join("embed_python")
-                    .join("Scripts")
-                    .join("pip.exe")
-                    .exists()
-            {
-                let embed_pip = dir.join("embed_python").join("Scripts").join("pip.exe");
-                let mut c = cmd(&embed_pip.to_string_lossy());
-                c.args(["install", "fastapi", "uvicorn[standard]"]);
-                c.env_remove("PYTHONHOME");
-                c.output().map(|o| o.status.success()).unwrap_or(false)
-            } else {
-                false
-            };
-            if !installed {
-                let sys_py = PathBuf::from(python_name());
-                let mut pip_cmd = cmd(&sys_py.to_string_lossy());
-                pip_cmd.args(["-m", "pip", "install", "fastapi", "uvicorn[standard]"]);
-                pip_cmd.env_remove("PYTHONHOME");
-                if label == "venv" {
-                    if let Some(sp) = find_venv_site_packages(&venv_dir) {
-                        pip_cmd.arg("--target");
-                        pip_cmd.arg(sp.to_string_lossy().to_string());
-                    }
-                } else if label == "embed" {
-                    let sp = dir.join("embed_python").join("Lib").join("site-packages");
-                    if sp.exists() {
-                        pip_cmd.arg("--target");
-                        pip_cmd.arg(sp.to_string_lossy().to_string());
-                    }
+    // Fix missing packages with uv.
+    if !can_import(&venv_py, "fastapi") {
+        if uv_path.exists() {
+            eprintln!("[gladiator-gui] fastapi not importable, installing with uv");
+            let mut pip_cmd = cmd(&uv_path.to_string_lossy());
+            pip_cmd.args(["pip", "install", "fastapi", "uvicorn[standard]"]);
+            pip_cmd.current_dir(&dir);
+            pip_cmd.env_remove("PYTHONHOME");
+            match pip_cmd.output() {
+                Ok(out) if out.status.success() => {}
+                Ok(out) => {
+                    let stderr = String::from_utf8_lossy(&out.stderr);
+                    update_status(
+                        app_handle,
+                        "error",
+                        &format!(
+                            "Failed to install fastapi/uvicorn with uv:\n{}",
+                            stderr.trim()
+                        ),
+                        0,
+                    );
+                    return;
                 }
-                let result = pip_cmd.output();
-                match result {
-                    Ok(out) if out.status.success() => {}
-                    Ok(out) => {
-                        let stderr = String::from_utf8_lossy(&out.stderr);
-                        let msg = format!("Failed to install fastapi/uvicorn:\n{}", stderr.trim());
-                        update_status(app_handle, "error", &msg, 0);
-                        return;
-                    }
-                    Err(e) => {
-                        let msg = format!("Failed to run pip: {}", e);
-                        update_status(app_handle, "error", &msg, 0);
-                        return;
-                    }
+                Err(e) => {
+                    update_status(app_handle, "error", &format!("Failed to run uv: {}", e), 0);
+                    return;
                 }
             }
-            if !can_import(python, mod_name) {
-                let msg = format!(
-                    "{} still not importable after install. Try running:\n  pip install fastapi uvicorn[standard]",
-                    mod_name
-                );
-                update_status(app_handle, "error", &msg, 0);
-                return;
-            }
+        } else {
+            update_status(
+                app_handle,
+                "error",
+                "fastapi is not installed and uv is not available.\n\
+                 Reinstall the application.",
+                0,
+            );
+            return;
+        }
+        if !can_import(&venv_py, "fastapi") {
+            update_status(
+                app_handle,
+                "error",
+                "fastapi still not importable after uv install. Try reinstalling.",
+                0,
+            );
+            return;
         }
     }
 
     eprintln!(
-        "[gladiator-gui] Starting server with {}: {}",
-        label,
-        python.display()
+        "[gladiator-gui] Starting server with venv Python: {}",
+        venv_py.display()
     );
-    match try_start_server(python, &script, &site_pkgs) {
+    match try_start_server(&venv_py, &script, &None) {
         Ok(child) => {
             *app_handle.state::<ApiProcess>().0.lock().unwrap() = Some(child);
             update_status(app_handle, "ready", "Ready!", 100);
         }
         Err(e) => {
             let _ = std::fs::remove_file(dir.join(".installed"));
-            let msg = format!("Python server {}: {}", e, python.display());
+            let msg = format!("Python server {}: {}", e, venv_py.display());
             update_status(app_handle, "error", &msg, 0);
         }
     }
@@ -889,11 +804,6 @@ fn venv_python(venv_dir: &PathBuf) -> PathBuf {
 }
 
 #[cfg(not(target_os = "windows"))]
-fn venv_pip(venv_dir: &PathBuf) -> PathBuf {
-    venv_dir.join("bin").join("pip")
-}
-
-#[cfg(not(target_os = "windows"))]
 fn python_stdlib_ok(python: &PathBuf) -> bool {
     Command::new(python)
         .args(["-c", "import encodings"])
@@ -901,37 +811,6 @@ fn python_stdlib_ok(python: &PathBuf) -> bool {
         .output()
         .map(|o| o.status.success())
         .unwrap_or(false)
-}
-
-#[cfg(not(target_os = "windows"))]
-fn python_name() -> String {
-    let py3 = PathBuf::from("python3");
-    if python_stdlib_ok(&py3) {
-        return "python3".to_string();
-    }
-    let py = PathBuf::from("python");
-    if python_stdlib_ok(&py) {
-        return "python".to_string();
-    }
-    "python3".to_string()
-}
-
-#[cfg(not(target_os = "windows"))]
-fn pip_install(venv_dir: &PathBuf, pkgs: &[&str]) -> Result<String, String> {
-    let mut cmd = Command::new(&venv_pip(venv_dir));
-    cmd.args(["install"]);
-    cmd.args(pkgs);
-    cmd.env_remove("PYTHONHOME");
-    let out = cmd
-        .output()
-        .map_err(|e| format!("Failed to run pip: {}", e))?;
-    if out.status.success() {
-        let text = String::from_utf8_lossy(&out.stdout).trim().to_string();
-        Ok(text)
-    } else {
-        let stderr = String::from_utf8_lossy(&out.stderr);
-        Err(stderr.trim().to_string())
-    }
 }
 
 #[cfg(not(target_os = "windows"))]
@@ -1164,25 +1043,56 @@ fn install_backend(dir: &PathBuf, app: &tauri::AppHandle) -> bool {
     let _ = std::fs::remove_dir_all(&tmp_extract);
     try_restore_user_data(&backup, &backend);
 
-    update_status(app, "venv", "Setting up Python environment\u{2026}", 30);
-    let venv_dir = dir.join(".venv");
-    let py_name = python_name();
-    let py_path = PathBuf::from(&py_name);
-    if !python_stdlib_ok(&py_path) {
-        update_status(
-            app,
-            "error",
-            &format!(
-                "Python was not found. Make sure python3 is installed and on the PATH.\n\
-                 Tried: '{}', 'python3', 'python'",
-                py_name
-            ),
-            0,
-        );
+    // Download uv binary.
+    update_status(app, "downloading", "Downloading uv\u{2026}", 30);
+    let uv_path = dir.join("uv");
+    let uv_url = if cfg!(target_os = "macos") {
+        "https://github.com/astral-sh/uv/releases/download/0.5.0/uv-aarch64-apple-darwin.tar.gz"
+    } else {
+        "https://github.com/astral-sh/uv/releases/download/0.5.0/uv-x86_64-unknown-linux-gnu.tar.gz"
+    };
+    let uv_archive = dir.join("uv.tar.gz");
+    if !download_file(uv_url, &uv_archive, app) {
+        try_restore_user_data(&backup, &backend);
         return false;
     }
-    let mut venv_cmd = Command::new(&py_name);
-    venv_cmd.args(["-m", "venv", &venv_dir.to_string_lossy()]);
+    let mut tar_cmd = Command::new("tar");
+    tar_cmd.args([
+        "-xzf",
+        &uv_archive.to_string_lossy(),
+        "--strip-components=1",
+        "-C",
+        &dir.to_string_lossy(),
+    ]);
+    match tar_cmd.output() {
+        Ok(out) if out.status.success() => {}
+        Ok(out) => {
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            update_status(
+                app,
+                "error",
+                &format!("Failed to extract uv:\n{}", stderr.trim()),
+                0,
+            );
+            try_restore_user_data(&backup, &backend);
+            return false;
+        }
+        Err(e) => {
+            update_status(app, "error", &format!("Failed to run tar: {}", e), 0);
+            try_restore_user_data(&backup, &backend);
+            return false;
+        }
+    }
+    let _ = std::fs::remove_file(&uv_archive);
+    use std::os::unix::fs::PermissionsExt;
+    let _ = std::fs::set_permissions(&uv_path, std::fs::Permissions::from_mode(0o755));
+
+    // Create virtual environment with uv (downloads Python if needed).
+    update_status(app, "venv", "Creating virtual environment\u{2026}", 45);
+    let venv_dir = dir.join(".venv");
+    let mut venv_cmd = Command::new(&uv_path);
+    venv_cmd.args(["venv", "--python", "3.11", &venv_dir.to_string_lossy()]);
+    venv_cmd.current_dir(&dir);
     venv_cmd.env_remove("PYTHONHOME");
     match venv_cmd.output() {
         Ok(out) if out.status.success() => {}
@@ -1192,7 +1102,48 @@ fn install_backend(dir: &PathBuf, app: &tauri::AppHandle) -> bool {
                 app,
                 "error",
                 &format!(
-                    "Failed to create Python virtual environment:\n{}",
+                    "Failed to create virtual environment with uv:\n{}",
+                    stderr.trim()
+                ),
+                0,
+            );
+            try_restore_user_data(&backup, &backend);
+            return false;
+        }
+        Err(e) => {
+            update_status(app, "error", &format!("Failed to run uv: {}", e), 0);
+            try_restore_user_data(&backup, &backend);
+            return false;
+        }
+    }
+    let python_bin = venv_python(&venv_dir);
+    if !python_bin.exists() || !python_stdlib_ok(&python_bin) {
+        update_status(
+            app,
+            "error",
+            "uv created the virtual environment but the Python interpreter is not functional.",
+            0,
+        );
+        try_restore_user_data(&backup, &backend);
+        return false;
+    }
+
+    // Install pip dependencies with uv.
+    update_status(app, "deps", "Installing Python packages\u{2026}", 60);
+    let req_path = backend.join("requirements.txt");
+    let mut pip_cmd = Command::new(&uv_path);
+    pip_cmd.args(["pip", "install", "-r", &req_path.to_string_lossy()]);
+    pip_cmd.current_dir(&dir);
+    pip_cmd.env_remove("PYTHONHOME");
+    match pip_cmd.output() {
+        Ok(out) if out.status.success() => {}
+        Ok(out) => {
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            update_status(
+                app,
+                "error",
+                &format!(
+                    "Failed to install Python packages with uv:\n{}",
                     stderr.trim()
                 ),
                 0,
@@ -1203,67 +1154,21 @@ fn install_backend(dir: &PathBuf, app: &tauri::AppHandle) -> bool {
             update_status(
                 app,
                 "error",
-                &format!("Failed to run Python ({}): {}", py_name, e),
+                &format!("Failed to run uv pip install: {}", e),
                 0,
             );
             return false;
         }
     }
 
-    let python_bin = venv_python(&venv_dir);
-    if !python_bin.exists() {
-        let bin_dir = venv_dir.join("bin");
-        let contents = match std::fs::read_dir(&bin_dir) {
-            Ok(entries) => entries
-                .filter_map(|e| e.ok().map(|e| e.file_name().to_string_lossy().to_string()))
-                .collect::<Vec<_>>()
-                .join(", "),
-            Err(_) => "directory not found".to_string(),
-        };
-        update_status(
-            app,
-            "error",
-            &format!(
-                "Virtual environment created but no Python binary found in {}.\n\
-                 Contents: {}",
-                bin_dir.display(),
-                contents
-            ),
-            0,
-        );
-        return false;
-    }
-
-    update_status(app, "deps", "Installing Python packages\u{2026}", 40);
-    let req_path = backend.join("requirements.txt");
-    let mut pip_req = Command::new(&venv_pip(&venv_dir));
-    pip_req.args(["install", "-r", &req_path.to_string_lossy()]);
-    pip_req.env_remove("PYTHONHOME");
-    match pip_req.output() {
-        Ok(out) if out.status.success() => {}
-        Ok(out) => {
-            let stderr = String::from_utf8_lossy(&out.stderr);
-            update_status(
-                app,
-                "error",
-                &format!("Failed to install Python packages:\n{}", stderr.trim()),
-                0,
-            );
-            return false;
-        }
-        Err(e) => {
-            update_status(app, "error", &format!("Failed to run pip: {}", e), 0);
-            return false;
-        }
-    }
-
+    // Install PyTorch (optional, for NN engine support).
     update_status(
         app,
         "torch",
         "Detecting GPU and installing PyTorch\u{2026}",
-        65,
+        80,
     );
-    let mut torch_cmd = Command::new(&venv_python(&venv_dir));
+    let mut torch_cmd = Command::new(&python_bin);
     torch_cmd.arg(backend.join("install.py"));
     torch_cmd.current_dir(&backend);
     torch_cmd.env_remove("PYTHONHOME");
@@ -1303,6 +1208,7 @@ fn install_backend(dir: &PathBuf, app: &tauri::AppHandle) -> bool {
 #[cfg(not(target_os = "windows"))]
 fn start_production_server(app_handle: &tauri::AppHandle) {
     let dir = data_dir();
+    let uv_path = dir.join("uv");
     let venv_dir = dir.join(".venv");
     let script = dir.join("backend").join("gladiator_api.py");
 
@@ -1314,92 +1220,100 @@ fn start_production_server(app_handle: &tauri::AppHandle) {
     );
 
     let venv_py = venv_python(&venv_dir);
-    let system_py = PathBuf::from(python_name());
-    let mut sp = find_venv_site_packages(&venv_dir);
 
-    let venv_ok = venv_py.exists() && python_stdlib_ok(&venv_py);
-    let sys_ok = python_stdlib_ok(&system_py);
-
-    let (bin, label) = if venv_ok {
-        (venv_py, "venv")
-    } else if sys_ok {
-        eprintln!("[gladiator-gui] venv Python broken (stdlib check failed), using system python");
-        (system_py, "system")
-    } else {
-        let msg = "No working Python interpreter found. Make sure Python 3 is installed and its standard library is intact.".to_string();
-        update_status(app_handle, "error", &msg, 0);
-        return;
-    };
-
-    let site_pkgs = if label == "system" { sp.take() } else { None };
-
-    let python = &bin;
-    for mod_name in &["fastapi"] {
-        if !can_import(python, mod_name) {
-            eprintln!("[gladiator-gui] {} not importable, installing...", mod_name);
+    // Ensure the virtual environment is functional.
+    if !venv_py.exists() || !python_stdlib_ok(&venv_py) {
+        if uv_path.exists() {
+            eprintln!("[gladiator-gui] venv broken, recreating with uv");
+            let mut venv_cmd = Command::new(&uv_path);
+            venv_cmd.args(["venv", "--python", "3.11", &venv_dir.to_string_lossy()]);
+            venv_cmd.current_dir(&dir);
+            venv_cmd.env_remove("PYTHONHOME");
+            match venv_cmd.output() {
+                Ok(out) if out.status.success() => {}
+                _ => {
+                    update_status(
+                        app_handle,
+                        "error",
+                        "Failed to recreate virtual environment with uv.",
+                        0,
+                    );
+                    return;
+                }
+            }
+        } else {
             update_status(
                 app_handle,
-                "deps",
-                "Installing missing Python packages\u{2026}",
-                85,
+                "error",
+                "No working Python virtual environment found and uv is not available.\n\
+                 Reinstall the application.",
+                0,
             );
+            return;
+        }
+    }
 
-            let installed = if venv_dir.join("bin").join("pip").exists() {
-                pip_install(&venv_dir, &["fastapi", "uvicorn[standard]"]).is_ok()
-            } else {
-                false
-            };
-            if !installed {
-                let sys_py = PathBuf::from(python_name());
-                let mut pip_cmd = Command::new(&sys_py);
-                pip_cmd.args(["-m", "pip", "install", "fastapi", "uvicorn[standard]"]);
-                pip_cmd.env_remove("PYTHONHOME");
-                if label == "venv" {
-                    if let Some(sp) = find_venv_site_packages(&venv_dir) {
-                        pip_cmd.arg("--target");
-                        pip_cmd.arg(sp.to_string_lossy().to_string());
-                    }
+    // Fix missing packages with uv.
+    if !can_import(&venv_py, "fastapi") {
+        if uv_path.exists() {
+            eprintln!("[gladiator-gui] fastapi not importable, installing with uv");
+            let mut pip_cmd = Command::new(&uv_path);
+            pip_cmd.args(["pip", "install", "fastapi", "uvicorn[standard]"]);
+            pip_cmd.current_dir(&dir);
+            pip_cmd.env_remove("PYTHONHOME");
+            match pip_cmd.output() {
+                Ok(out) if out.status.success() => {}
+                Ok(out) => {
+                    let stderr = String::from_utf8_lossy(&out.stderr);
+                    update_status(
+                        app_handle,
+                        "error",
+                        &format!(
+                            "Failed to install fastapi/uvicorn with uv:\n{}",
+                            stderr.trim()
+                        ),
+                        0,
+                    );
+                    return;
                 }
-                let result = pip_cmd.output();
-                match result {
-                    Ok(out) if out.status.success() => {}
-                    Ok(out) => {
-                        let stderr = String::from_utf8_lossy(&out.stderr);
-                        let msg = format!("Failed to install fastapi/uvicorn:\n{}", stderr.trim());
-                        update_status(app_handle, "error", &msg, 0);
-                        return;
-                    }
-                    Err(e) => {
-                        let msg = format!("Failed to run pip: {}", e);
-                        update_status(app_handle, "error", &msg, 0);
-                        return;
-                    }
+                Err(e) => {
+                    update_status(app_handle, "error", &format!("Failed to run uv: {}", e), 0);
+                    return;
                 }
             }
-            if !can_import(python, mod_name) {
-                let msg = format!(
-                    "{} still not importable after install. Try running:\n  pip install fastapi uvicorn[standard]",
-                    mod_name
-                );
-                update_status(app_handle, "error", &msg, 0);
-                return;
-            }
+        } else {
+            update_status(
+                app_handle,
+                "error",
+                "fastapi is not installed and uv is not available.\n\
+                 Reinstall the application.",
+                0,
+            );
+            return;
+        }
+        if !can_import(&venv_py, "fastapi") {
+            update_status(
+                app_handle,
+                "error",
+                "fastapi still not importable after uv install. Try reinstalling.",
+                0,
+            );
+            return;
         }
     }
 
     eprintln!(
-        "[gladiator-gui] Starting server with {}: {}",
-        label,
-        python.display()
+        "[gladiator-gui] Starting server with venv Python: {}",
+        venv_py.display()
     );
-    match try_start_server(python, &script, &site_pkgs) {
+    match try_start_server(&venv_py, &script, &None) {
         Ok(child) => {
             *app_handle.state::<ApiProcess>().0.lock().unwrap() = Some(child);
             update_status(app_handle, "ready", "Ready!", 100);
         }
         Err(e) => {
             let _ = std::fs::remove_file(dir.join(".installed"));
-            let msg = format!("Python server {}: {}", e, python.display());
+            let msg = format!("Python server {}: {}", e, venv_py.display());
             update_status(app_handle, "error", &msg, 0);
         }
     }
