@@ -89,7 +89,7 @@ jobs:
         shell: bash
         run: |
           mkdir -p gui/src-tauri/backend
-          zip gui/src-tauri/backend/gladiator-backend-windows.zip \
+          7z a -tzip gui/src-tauri/backend/gladiator-backend-windows.zip \
             gladiator_api.py main.py main_nn.py main_mini.py main_nn_mini.py \
             export_bot.py promote_bot.py install.py \
             requirements.txt \
