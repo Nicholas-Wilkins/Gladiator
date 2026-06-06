@@ -545,7 +545,13 @@ fn install_backend(dir: &PathBuf, app: &tauri::AppHandle) -> bool {
     update_status(app, "venv", "Creating virtual environment\u{2026}", 40);
     let venv_dir = dir.join(".venv");
     let mut venv_cmd = cmd(&uv_path.to_string_lossy());
-    venv_cmd.args(["venv", "--python", "3.11", &venv_dir.to_string_lossy()]);
+    venv_cmd.args([
+        "venv",
+        "--seed",
+        "--python",
+        "3.11",
+        &venv_dir.to_string_lossy(),
+    ]);
     venv_cmd.current_dir(&dir);
     venv_cmd.env_remove("PYTHONHOME");
     match venv_cmd.output() {
@@ -680,7 +686,13 @@ fn start_production_server(app_handle: &tauri::AppHandle) {
         if uv_path.exists() {
             eprintln!("[gladiator-gui] venv broken, recreating with uv");
             let mut venv_cmd = cmd(&uv_path.to_string_lossy());
-            venv_cmd.args(["venv", "--python", "3.11", &venv_dir.to_string_lossy()]);
+            venv_cmd.args([
+                "venv",
+                "--seed",
+                "--python",
+                "3.11",
+                &venv_dir.to_string_lossy(),
+            ]);
             venv_cmd.current_dir(&dir);
             venv_cmd.env_remove("PYTHONHOME");
             match venv_cmd.output() {
@@ -1091,7 +1103,13 @@ fn install_backend(dir: &PathBuf, app: &tauri::AppHandle) -> bool {
     update_status(app, "venv", "Creating virtual environment\u{2026}", 45);
     let venv_dir = dir.join(".venv");
     let mut venv_cmd = Command::new(&uv_path);
-    venv_cmd.args(["venv", "--python", "3.11", &venv_dir.to_string_lossy()]);
+    venv_cmd.args([
+        "venv",
+        "--seed",
+        "--python",
+        "3.11",
+        &venv_dir.to_string_lossy(),
+    ]);
     venv_cmd.current_dir(&dir);
     venv_cmd.env_remove("PYTHONHOME");
     match venv_cmd.output() {
@@ -1226,7 +1244,13 @@ fn start_production_server(app_handle: &tauri::AppHandle) {
         if uv_path.exists() {
             eprintln!("[gladiator-gui] venv broken, recreating with uv");
             let mut venv_cmd = Command::new(&uv_path);
-            venv_cmd.args(["venv", "--python", "3.11", &venv_dir.to_string_lossy()]);
+            venv_cmd.args([
+                "venv",
+                "--seed",
+                "--python",
+                "3.11",
+                &venv_dir.to_string_lossy(),
+            ]);
             venv_cmd.current_dir(&dir);
             venv_cmd.env_remove("PYTHONHOME");
             match venv_cmd.output() {
