@@ -60,6 +60,7 @@ def _build_cpu_engine(repo_root: Path) -> str:
     return _inline_sources([
         base / "tables.py",
         base / "params.py",
+        base / "transposition.py",
         base / "evaluator.py",
         base / "search.py",
         base / "bot.py",

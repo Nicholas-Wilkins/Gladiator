@@ -20,7 +20,9 @@ class Bot:
 
     def choose_move(self, board: chess.Board, depth: int | None = None) -> chess.Move:
         """Return the best legal move for the current position."""
-        return best_move(board, self.params, self.rng, depth=depth)
+        from gladiator.bot.transposition import TranspositionTable
+        tt = TranspositionTable()
+        return best_move(board, self.params, self.rng, depth=depth, tt=tt)
 
     @property
     def bot_id(self) -> str:

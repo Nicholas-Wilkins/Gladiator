@@ -84,8 +84,8 @@ class BotParams:
         piece_values[6] = BASE_PIECE_VALUES[6]  # keep king value fixed
 
         pst = {
-            pt: (base_table + rng.normal(0, 15, size=64)).astype(np.float32)
-            for pt, base_table in BASE_PST.items()
+            pt: rng.normal(0, 50, size=64).astype(np.float32)
+            for pt in BASE_PST
         }
 
         return cls(
