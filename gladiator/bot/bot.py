@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import threading
+
 import chess
 import numpy as np
 
 from gladiator.bot.params import BotParams
 from gladiator.bot.search import best_move
+from gladiator.bot.transposition import TranspositionTable
 
 
 class Bot:
@@ -18,11 +21,10 @@ class Bot:
     # Public interface                                                     #
     # ------------------------------------------------------------------ #
 
-    def choose_move(self, board: chess.Board, depth: int | None = None) -> chess.Move:
+    def choose_move(self, board: chess.Board, depth: int | None = None, stop_event: threading.Event | None = None) -> chess.Move:
         """Return the best legal move for the current position."""
-        from gladiator.bot.transposition import TranspositionTable
         tt = TranspositionTable()
-        return best_move(board, self.params, self.rng, depth=depth, tt=tt)
+        return best_move(board, self.params, self.rng, depth=depth, tt=tt, stop_event=stop_event)
 
     @property
     def bot_id(self) -> str:

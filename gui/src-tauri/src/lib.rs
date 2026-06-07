@@ -291,34 +291,11 @@ fn copy_dir(src: &PathBuf, dst: &PathBuf) -> Result<(), String> {
 }
 
 #[cfg(target_os = "windows")]
-fn find_venv_site_packages(venv_dir: &PathBuf) -> Option<PathBuf> {
-    let sp = venv_dir.join("Lib").join("site-packages");
-    if sp.exists() {
-        Some(sp)
-    } else {
-        None
-    }
-}
-
-#[cfg(target_os = "windows")]
-fn try_start_server(
-    bin: &PathBuf,
-    script: &PathBuf,
-    site_packages: &Option<PathBuf>,
-) -> Result<Child, String> {
+fn try_start_server(bin: &PathBuf, script: &PathBuf) -> Result<Child, String> {
     kill_port(8742);
     let mut c = cmd(&bin.to_string_lossy());
     c.arg(script).arg("8742");
     c.stderr(Stdio::piped());
-    if let Some(sp) = site_packages {
-        let existing = std::env::var("PYTHONPATH").unwrap_or_default();
-        let combined = if existing.is_empty() {
-            sp.to_string_lossy().to_string()
-        } else {
-            format!("{};{}", sp.display(), existing)
-        };
-        c.env("PYTHONPATH", combined);
-    }
     c.env_remove("PYTHONHOME");
     let mut child = c.spawn().map_err(|e| format!("Failed to spawn: {}", e))?;
     std::thread::sleep(std::time::Duration::from_millis(400));
@@ -772,7 +749,7 @@ fn start_production_server(app_handle: &tauri::AppHandle) {
         "[gladiator-gui] Starting server with venv Python: {}",
         venv_py.display()
     );
-    match try_start_server(&venv_py, &script, &None) {
+    match try_start_server(&venv_py, &script) {
         Ok(child) => {
             *app_handle.state::<ApiProcess>().0.lock().unwrap() = Some(child);
             update_status(app_handle, "ready", "Ready!", 100);
@@ -887,40 +864,12 @@ fn copy_dir(src: &PathBuf, dst: &PathBuf) -> Result<(), String> {
 }
 
 #[cfg(not(target_os = "windows"))]
-fn find_venv_site_packages(venv_dir: &PathBuf) -> Option<PathBuf> {
-    let lib = venv_dir.join("lib");
-    let ok = std::fs::read_dir(&lib).ok()?;
-    let py_ver = ok
-        .filter_map(|e| e.ok())
-        .map(|e| e.file_name())
-        .find(|n| n.to_string_lossy().starts_with("python3"))?;
-    let sp = lib.join(&py_ver).join("site-packages");
-    if sp.exists() {
-        Some(sp)
-    } else {
-        None
-    }
-}
-
 #[cfg(not(target_os = "windows"))]
-fn try_start_server(
-    bin: &PathBuf,
-    script: &PathBuf,
-    site_packages: &Option<PathBuf>,
-) -> Result<Child, String> {
+fn try_start_server(bin: &PathBuf, script: &PathBuf) -> Result<Child, String> {
     kill_port(8742);
     let mut cmd = Command::new(bin);
     cmd.arg(script).arg("8742");
     cmd.stderr(Stdio::piped());
-    if let Some(sp) = site_packages {
-        let existing = std::env::var("PYTHONPATH").unwrap_or_default();
-        let combined = if existing.is_empty() {
-            sp.to_string_lossy().to_string()
-        } else {
-            format!("{}:{}", sp.display(), existing)
-        };
-        cmd.env("PYTHONPATH", combined);
-    }
     cmd.env_remove("PYTHONHOME");
     let mut child = cmd.spawn().map_err(|e| format!("Failed to spawn: {}", e))?;
     std::thread::sleep(std::time::Duration::from_millis(400));
@@ -1330,7 +1279,7 @@ fn start_production_server(app_handle: &tauri::AppHandle) {
         "[gladiator-gui] Starting server with venv Python: {}",
         venv_py.display()
     );
-    match try_start_server(&venv_py, &script, &None) {
+    match try_start_server(&venv_py, &script) {
         Ok(child) => {
             *app_handle.state::<ApiProcess>().0.lock().unwrap() = Some(child);
             update_status(app_handle, "ready", "Ready!", 100);

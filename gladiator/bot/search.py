@@ -7,6 +7,8 @@ negation of the value to the opponent, so we never branch on "whose turn".
 
 from __future__ import annotations
 
+import threading
+
 import chess
 
 from gladiator.bot.evaluator import evaluate
@@ -23,6 +25,7 @@ def best_move(
     rng=None,
     depth: int | None = None,
     tt: TranspositionTable | None = None,
+    stop_event: threading.Event | None = None,
 ) -> chess.Move:
     """Return the best move for the side to move according to this bot."""
     search_depth = depth if depth is not None else params.search_depth
@@ -41,8 +44,12 @@ def best_move(
     beta = _INF
 
     for move in _order_moves(board, legal, tt_move):
+        if stop_event and stop_event.is_set():
+            if best_score == -_INF:
+                best = move
+            break
         board.push(move)
-        score = -_negamax(board, params, search_depth - 1, -beta, -alpha, tt)
+        score = -_negamax(board, params, search_depth - 1, -beta, -alpha, tt, stop_event)
         board.pop()
 
         # Sub-centipawn jitter breaks ties without affecting real score differences
@@ -70,7 +77,11 @@ def _negamax(
     alpha: float,
     beta: float,
     tt: TranspositionTable | None = None,
+    stop_event: threading.Event | None = None,
 ) -> float:
+    if stop_event and stop_event.is_set():
+        return 0.0
+
     key = board._transposition_key()
 
     if board.is_repetition() or board.is_fifty_moves():
@@ -91,8 +102,10 @@ def _negamax(
     best_move_inner = None
     orig_alpha = alpha
     for move in _order_moves(board, list(board.legal_moves)):
+        if stop_event and stop_event.is_set():
+            break
         board.push(move)
-        score = -_negamax(board, params, depth - 1, -beta, -alpha, tt)
+        score = -_negamax(board, params, depth - 1, -beta, -alpha, tt, stop_event)
         board.pop()
 
         if score > best_score:

@@ -591,7 +591,7 @@ async def _monitor():
 play_games: dict[str, dict] = {}
 play_lock = asyncio.Lock()
 
-_DEPTH_MAP = {"low": 2, "medium": 3, "high": 5}
+_DEPTH_MAP = {"low": 2, "medium": 3, "high": 4}
 
 
 async def _uci_read_line(proc: asyncio.subprocess.Process, timeout: float = 10.0) -> str:

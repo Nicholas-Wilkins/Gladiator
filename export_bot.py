@@ -234,8 +234,9 @@ class _Engine:
                 break
 
     def _search(self, board, depth):
-        move = self._bot.choose_move(board, depth=depth)
-        print(f"info depth {{depth}}", flush=True)
+        move = self._bot.choose_move(board, depth=depth, stop_event=self._stop)
+        if not self._stop.is_set():
+            print(f"info depth {{depth}}", flush=True)
         print(f"bestmove {{move.uci()}}", flush=True)
 
 

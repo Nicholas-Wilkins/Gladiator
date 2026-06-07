@@ -315,11 +315,9 @@ async function refreshTrainingSessions() {
 $("#btn-start").addEventListener("click", async () => {
   const engine = $("#tr-engine").value;
   const numWorkers = parseInt($("#tr-workers").value) || 1;
-  const seed = $("#tr-seed").value ? parseInt($("#tr-seed").value) : undefined;
   const maxGames = $("#tr-max-games").value ? parseInt($("#tr-max-games").value) : undefined;
 
   const body = { engine, num_workers: numWorkers };
-  if (seed !== undefined) body.seed = seed;
   if (maxGames !== undefined) body.max_games = maxGames;
 
   const result = await api("POST", "/api/sessions/create", body);

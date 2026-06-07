@@ -139,12 +139,10 @@ class UCIEngine:
                 break
 
     def _search(self, board: chess.Board) -> None:
-        move = self._bot.choose_move(board)
+        move = self._bot.choose_move(board, stop_event=self._stop_event)
         if not self._stop_event.is_set():
             _send(f"info depth {self._bot.params.search_depth}")
-            _send(f"bestmove {move.uci()}")
-        else:
-            _send(f"bestmove {move.uci()}")
+        _send(f"bestmove {move.uci()}")
 
 
 def main() -> None:
