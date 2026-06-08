@@ -17,6 +17,7 @@
       "icons/icon.png",
       "icons/icon.ico"
     ],
+    "resources": [],
     "windows": {
       "wix": {},
       "nsis": {}
