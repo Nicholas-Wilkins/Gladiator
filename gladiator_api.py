@@ -137,6 +137,7 @@ def _read_lineage(db_path: Path) -> list[dict]:
         return []
     try:
         con = sqlite3.connect(str(db_path), timeout=2)
+        con.row_factory = sqlite3.Row
         rows = con.execute(
             "SELECT bot_id, generation, crowned_at, total_matches_at_crowning "
             "FROM champion_log ORDER BY rowid"

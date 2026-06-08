@@ -370,7 +370,6 @@ async function refreshChampion() {
 
   if (!dbs.length) {
     renderChampionCard(null);
-    renderLineage([]);
     renderMatchStats([]);
     _bestExportDb = null;
     return;
@@ -380,12 +379,10 @@ async function refreshChampion() {
     dbs.map(d =>
       Promise.all([
         api("GET", `/api/dbs/${d.name}/champion`),
-        api("GET", `/api/dbs/${d.name}/lineage`),
         api("GET", `/api/dbs/${d.name}/stats`),
-      ]).then(([c, l, s]) => ({
+      ]).then(([c, s]) => ({
         db: d.name,
         champion: c.champion,
-        lineage: l.lineage || [],
         matches: s.matches || [],
       }))
     )
@@ -409,7 +406,6 @@ async function refreshChampion() {
   allMatches.sort((a, b) => ((b.generation || 0) - (a.generation || 0)));
 
   renderChampionCard(bestChamp);
-  renderLineage(results.find(r => r.db === bestDb)?.lineage || []);
   renderMatchStats(allMatches);
 
   _bestExportDb = bestDb;
@@ -434,33 +430,26 @@ function renderChampionCard(champion) {
     </div>`;
 }
 
-function renderLineage(lineage) {
-  const el = $("#lineage-table");
-  if (!lineage.length) {
-    el.innerHTML = '<p class="empty-state">No champion lineage recorded.</p>';
-    return;
-  }
-  let html = `<table><thead><tr><th>#</th><th>Bot ID</th><th>Generation</th><th>Crowned At</th><th>Matches</th></tr></thead><tbody>`;
-  lineage.forEach((row, i) => {
-    const date = row.crowned_at ? new Date(row.crowned_at * 1000).toLocaleString() : "—";
-    html += `<tr><td>${i + 1}</td><td>${escapeHtml((row.bot_id || "").slice(0, 16))}…</td><td>${row.generation || "—"}</td><td>${date}</td><td>${row.total_matches_at_crowning ?? "—"}</td></tr>`;
-  });
-  html += `</tbody></table>`;
-  el.innerHTML = html;
-}
-
 function renderMatchStats(matches) {
   const el = $("#stats-table");
   if (!matches.length) {
     el.innerHTML = '<p class="empty-state">No match data yet.</p>';
     return;
   }
+  el._fullMatches = matches;
+  const expanded = el.dataset.expanded === "true";
+  const limit = expanded ? matches.length : 20;
+  const rows = matches.slice(0, limit);
   let html = `<table><thead><tr><th>Gen</th><th>Mode</th><th>Outcome</th><th>Score</th><th>Games</th></tr></thead><tbody>`;
-  matches.slice(0, 30).forEach(m => {
+  rows.forEach(m => {
     const outcome = m.champion_won ? '<span class="win">KEPT</span>' : '<span class="loss">DETHRONED</span>';
     html += `<tr><td>${m.generation}</td><td>${m.mode || "—"}</td><td>${outcome}</td><td>${m.score_champion ?? "—"} / ${m.score_challenger ?? "—"}</td><td>${m.total_games ?? "—"}</td></tr>`;
   });
   html += `</tbody></table>`;
+  if (matches.length > 20) {
+    const label = expanded ? "Show less" : `Show all (${matches.length})`;
+    html += `<button class="btn expand-btn" onclick="var e=document.getElementById('stats-table'); e.dataset.expanded=e.dataset.expanded==='true'?'':'true'; renderMatchStats(e._fullMatches)">${label}</button>`;
+  }
   el.innerHTML = html;
 }
 
@@ -987,23 +976,23 @@ document.addEventListener("mouseup", handleDocMouseUp);
 
 const WT = {
   dashboard: [
-    { target: ".engine-grid", title: "Engine Cards", text: "Each card shows one engine variant — CPU Heuristic, Neural Network, Mini, or NN Mini. The mode (RANDOM/MUTATION), consecutive wins, match count, and generation tell you how the champion is performing." },
-    { target: "#session-list", title: "Active Sessions", text: "Running training sessions appear here. You can see the current match board, engine type, worker ID, and stop a session if needed." },
+    { target: "#page-dashboard header", title: "Welcome to Gladiator", text: "Gladiator is a self-improving chess engine trainer. It pits AI challengers against a reigning champion using evolutionary competition — winners take the crown and the cycle continues, getting stronger over time." },
+    { target: ".engine-grid", title: "Dashboard", text: "The dashboard shows all engine variants (CPU Heuristic, Neural Network, Mini, NN Mini) and their current champion stats. Active training sessions also appear here so you can monitor progress at a glance." },
   ],
   training: [
-    { target: "#tr-engine", title: "Engine Type", text: "Choose which engine to train. CPU Heuristic is fast and runs anywhere. Neural Network learns patterns but benefits from a GPU. Mini variants are lightweight for quick experiments." },
-    { target: "#tr-workers", title: "Workers", text: "Run multiple training workers in parallel. Each worker gets its own RNG stream so they explore different challengers simultaneously." },
+    { target: "#tr-engine", title: "Engine Type", text: "Choose which engine to train. CPU Heuristic can train perfectly on any hardware, so I recommend starting off with that. Neural Network can play more training games in less time but only on computers with dedicated GPUs. Mini variants are the same as their full size counterparts, but initiate mutation mode quicker." },
+    { target: "#tr-workers", title: "Workers", text: "Run multiple training workers in parallel. Each worker gets its own RNG stream so they explore different strategies simultaneously. workers start off creating new bots in random mode, but once one hits a win streak of 100 (or 15 for mini variants) new bots are created as genetic modifications of the current champion." },
     { target: "#tr-max-games", title: "Max Games", text: "Optionally stop training after a set number of games. Leave empty to run until you stop it manually." },
     { target: "#btn-start", title: "Start Training", text: "Click to launch training with your settings. A new session appears below where you can watch the current match and stop when ready." },
   ],
   champion: [
     { target: "#champion-card", title: "Champion Stats", text: "The current champion's ID, training mode, generation, wins, and total matches. The champion is the best bot found so far." },
-    { target: "#ch-export", title: "Export Bot", text: "Export the champion as a standalone UCI engine script. You can then play against it in the Play tab or use it with any UCI-compatible chess GUI." },
-    { target: "#ch-promote", title: "Promote to Mutation", text: "Once your champion is strong, promote it to MUTATION mode. Future challengers will be evolved variants of the champion rather than random bots, focusing on refinement." },
-    { target: "#lineage-table", title: "Lineage", text: "Every champion change is recorded here. You can trace the full history of which bot held the crown and when." },
+    { target: "#ch-export", title: "Export Bot", text: "Export your champions as standalone UCI engine scripts, then play against them in the play tab to see the progress your Gladiator engine is making!" },
+    { target: "#ch-promote", title: "Promote to Mutation", text: "If you can't wait for a bot to hit 100 straight wins, you can promote it to MUTATION mode. Future challengers will be evolved variants of the champion rather than random bots, focusing on refinement." },
+    { target: "#stats-table", title: "Match History", text: "Every match the champion has played is recorded here, showing the generation, mode, whether the champion kept or lost the crown, and the score." },
   ],
   play: [
-    { target: "#play-no-bot", title: "Choose an Opponent", text: "First, pick an exported bot to play against. Click this button to browse available bots." },
+    { target: "#play-no-bot", title: "Choose an Opponent", text: "First, pick an exported Gladiator bot to play against. Click this button to browse available bots." },
     { target: "#play-color-label", title: "Play as", text: "Choose to play as White or Black. If you pick Black, the bot will make the first move." },
     { target: "#play-difficulty-label", title: "Time to Think", text: "Controls how deep the bot searches. Low = depth 2 (fast, weaker), Medium = depth 3, High = depth 4 (slower, stronger)." },
     { target: "#play-reset", title: "Reset Game", text: "Start a new game against the same opponent. Your color and difficulty settings carry over." },
@@ -1067,6 +1056,9 @@ function startWalkthrough(tab) {
     for (const [t, steps] of Object.entries(WT)) {
       for (const s of steps) _wtSteps.push({ ...s, tab: t });
     }
+  }
+  if (!tab) {
+    _wtSteps.push({ tab: "help", target: "#page-help", title: "Walkthrough Complete", text: "That covers the basics. You can replay this walkthrough anytime from the Help tab." });
   }
   if (!_wtSteps.length) return;
   _wtStep = 0;

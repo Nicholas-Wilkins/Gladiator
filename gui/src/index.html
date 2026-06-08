@@ -111,10 +111,6 @@
       </div>
       <div id="champion-card" class="section-card"></div>
       <section class="section-card">
-        <h3>Lineage</h3>
-        <div id="lineage-table"></div>
-      </section>
-      <section class="section-card">
         <h3>Recent Matches</h3>
         <div id="stats-table"></div>
       </section>
@@ -233,91 +229,7 @@
   </div>
 </div>
 <div class="walkthrough-mascot hidden">
-  <svg class="gladiator-svg" viewBox="0 0 120 150" xmlns="http://www.w3.org/2000/svg">
-    <defs>
-      <linearGradient id="helmetGrad" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%" stop-color="#d5dbdb"/>
-        <stop offset="100%" stop-color="#95a5a6"/>
-      </linearGradient>
-      <linearGradient id="bodyGrad" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%" stop-color="#e74c3c"/>
-        <stop offset="100%" stop-color="#c0392b"/>
-      </linearGradient>
-      <linearGradient id="shieldGrad" x1="0" y1="0" x2="1" y2="1">
-        <stop offset="0%" stop-color="#5dade2"/>
-        <stop offset="100%" stop-color="#2e86c1"/>
-      </linearGradient>
-    </defs>
-    <!-- Helmet crest -->
-    <path d="M68 12 Q55 -10 68 -2 Q81 -10 68 12" fill="#e74c3c" stroke="#c0392b" stroke-width="1"/>
-    <!-- Helmet -->
-    <ellipse cx="68" cy="32" rx="24" ry="17" fill="url(#helmetGrad)" stroke="#7f8c8d" stroke-width="1.5"/>
-    <rect x="44" y="28" width="48" height="12" rx="4" fill="#7f8c8d"/>
-    <rect x="44" y="28" width="48" height="6" rx="2" fill="#95a5a6"/>
-    <!-- Helmet visor rim -->
-    <rect x="44" y="32" width="48" height="3" rx="1" fill="#6c7a89"/>
-    <!-- Face -->
-    <circle cx="68" cy="48" r="17" fill="#f5cba7" stroke="#e8b88a" stroke-width="1"/>
-    <!-- Eyes -->
-    <ellipse cx="61" cy="45" rx="3" ry="3.5" fill="white"/>
-    <ellipse cx="75" cy="45" rx="3" ry="3.5" fill="white"/>
-    <circle cx="61" cy="45" r="2" fill="#2c3e50"/>
-    <circle cx="75" cy="45" r="2" fill="#2c3e50"/>
-    <!-- Eye shine -->
-    <circle cx="62" cy="44" r="0.8" fill="white"/>
-    <circle cx="76" cy="44" r="0.8" fill="white"/>
-    <!-- Eyebrows -->
-    <path d="M56 39 Q61 37 66 39" fill="none" stroke="#8b5e3c" stroke-width="1.5" stroke-linecap="round"/>
-    <path d="M70 39 Q75 37 80 39" fill="none" stroke="#8b5e3c" stroke-width="1.5" stroke-linecap="round"/>
-    <!-- Smile -->
-    <path d="M60 53 Q68 59 76 53" fill="none" stroke="#2c3e50" stroke-width="1.5" stroke-linecap="round"/>
-    <!-- Cheek blush -->
-    <ellipse cx="55" cy="51" rx="4" ry="2.5" fill="#e8a87c" opacity="0.4"/>
-    <ellipse cx="81" cy="51" rx="4" ry="2.5" fill="#e8a87c" opacity="0.4"/>
-    <!-- Neck -->
-    <rect x="60" y="62" width="16" height="8" rx="3" fill="#f5cba7"/>
-    <!-- Body / Tunic -->
-    <rect x="50" y="68" width="36" height="34" rx="6" fill="url(#bodyGrad)" stroke="#a93226" stroke-width="1"/>
-    <!-- Tunic detail lines -->
-    <line x1="56" y1="76" x2="56" y2="96" stroke="#c0392b" stroke-width="1.5" opacity="0.5"/>
-    <line x1="68" y1="76" x2="68" y2="96" stroke="#c0392b" stroke-width="1.5" opacity="0.5"/>
-    <line x1="80" y1="76" x2="80" y2="96" stroke="#c0392b" stroke-width="1.5" opacity="0.5"/>
-    <!-- Belt -->
-    <rect x="50" y="88" width="36" height="6" rx="2" fill="#f39c12" stroke="#d68910" stroke-width="0.8"/>
-    <!-- Belt buckle -->
-    <rect x="64" y="89" width="8" height="4" rx="1" fill="#f1c40f" stroke="#d4ac0d" stroke-width="0.5"/>
-    <!-- Left arm (holding shield side) -->
-    <rect x="42" y="70" width="10" height="22" rx="4" fill="#f5cba7" stroke="#e8b88a" stroke-width="0.8"/>
-    <!-- Right arm (sword arm) -->
-    <rect x="84" y="70" width="10" height="22" rx="4" fill="#f5cba7" stroke="#e8b88a" stroke-width="0.8"/>
-    <!-- Shield -->
-    <circle cx="46" cy="82" r="15" fill="url(#shieldGrad)" stroke="#1a5276" stroke-width="2"/>
-    <circle cx="46" cy="82" r="12" fill="none" stroke="#aed6f1" stroke-width="1" opacity="0.4"/>
-    <!-- Shield cross -->
-    <line x1="35" y1="82" x2="57" y2="82" stroke="#fdebd0" stroke-width="2.5" stroke-linecap="round"/>
-    <line x1="46" y1="71" x2="46" y2="93" stroke="#fdebd0" stroke-width="2.5" stroke-linecap="round"/>
-    <!-- Shield boss -->
-    <circle cx="46" cy="82" r="4" fill="#fdebd0" stroke="#d4ac0d" stroke-width="0.8"/>
-    <!-- Sword -->
-    <rect x="90" y="66" width="5" height="5" rx="1" fill="#f39c12" stroke="#d68910" stroke-width="0.5"/>
-    <rect x="91" y="52" width="4" height="15" rx="1" fill="#bdc3c7" stroke="#95a5a6" stroke-width="0.5"/>
-    <rect x="90" y="51" width="6" height="2" rx="0.5" fill="#f39c12"/>
-    <rect x="82" y="72" width="18" height="3" rx="1" fill="#d5dbdb" opacity="0.3"/>
-    <!-- Legs -->
-    <rect x="54" y="102" width="10" height="22" rx="3" fill="#f5cba7" stroke="#e8b88a" stroke-width="0.8"/>
-    <rect x="72" y="102" width="10" height="22" rx="3" fill="#f5cba7" stroke="#e8b88a" stroke-width="0.8"/>
-    <!-- Knee armor -->
-    <rect x="54" y="112" width="10" height="4" rx="2" fill="#bdc3c7" stroke="#95a5a6" stroke-width="0.5"/>
-    <rect x="72" y="112" width="10" height="4" rx="2" fill="#bdc3c7" stroke="#95a5a6" stroke-width="0.5"/>
-    <!-- Feet / Sandals -->
-    <rect x="50" y="122" width="16" height="7" rx="3" fill="#8b4513" stroke="#6b3410" stroke-width="0.8"/>
-    <rect x="70" y="122" width="16" height="7" rx="3" fill="#8b4513" stroke="#6b3410" stroke-width="0.8"/>
-    <!-- Sandal straps -->
-    <line x1="54" y1="125" x2="62" y2="125" stroke="#6b3410" stroke-width="1.2"/>
-    <line x1="74" y1="125" x2="82" y2="125" stroke="#6b3410" stroke-width="1.2"/>
-    <!-- Shadow under feet -->
-    <ellipse cx="68" cy="132" rx="26" ry="3" fill="rgba(0,0,0,0.12)"/>
-  </svg>
+  <img class="gladiator-svg" src="gladiator.svg" alt="Gladiator mascot" width="260" height="354">
 </div>
 
 <div id="toast-container"></div>

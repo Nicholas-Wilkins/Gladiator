@@ -310,6 +310,8 @@ td {
 
 tr:hover td { background: var(--bg-tertiary); }
 
+.expand-btn { margin-top: 8px; width: 100%; }
+
 .win { color: var(--green); }
 .loss { color: var(--red); }
 
@@ -689,9 +691,9 @@ body.dragging-piece .play-board .sq.sd:hover { background: #8f9cb5 !important; }
   animation: wtMascotIn 0.4s ease 0.15s both;
 }
 .walkthrough-mascot .gladiator-svg {
-  width: 96px;
-  height: 120px;
-  filter: drop-shadow(0 4px 10px rgba(0,0,0,0.3));
+  width: 260px;
+  height: 354px;
+  filter: drop-shadow(0 6px 16px rgba(0,0,0,0.35));
   animation: wtGladIdle 2.5s ease-in-out infinite;
 }
 @keyframes wtMascotIn {
