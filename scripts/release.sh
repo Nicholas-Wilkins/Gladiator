@@ -9,13 +9,14 @@ set -euo pipefail
 #
 # Usage:
 #   Local:   scripts/release.sh <version> [release notes file]
-#   CI/gh:   TAURI_SIGNING_PRIVATE_KEY="$KEY" scripts/release.sh <version>
+#   CI/gh:   TAURI_SIGNING_PRIVATE_KEY="$KEY" [TAURI_KEY_PASSWORD="$PW"] scripts/release.sh <version>
 #
 # Prerequisites (local):
 #   - ~/.tauri/gladiator.key must exist
 #   - Build artifacts in gui/target/release/bundle/{appimage,msi,nsis,dmg}
 # Prerequisites (CI):
-#   - TAURI_SIGNING_PRIVATE_KEY env var set to the private key string
+#   - TAURI_SIGNING_PRIVATE_KEY env var set to the full private key content
+#   - TAURI_KEY_PASSWORD env var (optional — omit if key has no password)
 #   - Artifacts in the current directory or a BUNDLE_DIR override
 
 if [ $# -lt 1 ]; then
@@ -30,13 +31,23 @@ KEY_FILE="$HOME/.tauri/gladiator.key"
 BUNDLE_DIR="${BUNDLE_DIR:-gui/target/release/bundle}"
 REPO="Nicholas-Wilkins/Gladiator"
 
-# If TAURI_SIGNING_PRIVATE_KEY is set, use it; otherwise require key file
-if [ -z "${TAURI_SIGNING_PRIVATE_KEY:-}" ]; then
-  if [ ! -f "$KEY_FILE" ]; then
-    echo "ERROR: No TAURI_SIGNING_PRIVATE_KEY env var and no key file at $KEY_FILE"
-    echo "Generate one with: cargo tauri signer generate -w $KEY_FILE"
-    exit 1
+# If TAURI_SIGNING_PRIVATE_KEY is set, write it to a temp file for the signer;
+# otherwise require the local key file
+TMP_KEY_FILE=""
+cleanup() {
+  if [ -n "$TMP_KEY_FILE" ] && [ -f "$TMP_KEY_FILE" ]; then
+    rm -f "$TMP_KEY_FILE"
   fi
+}
+trap cleanup EXIT
+
+if [ -n "${TAURI_SIGNING_PRIVATE_KEY:-}" ]; then
+  TMP_KEY_FILE=$(mktemp)
+  printf '%s' "$TAURI_SIGNING_PRIVATE_KEY" > "$TMP_KEY_FILE"
+elif [ ! -f "$KEY_FILE" ]; then
+  echo "ERROR: No TAURI_SIGNING_PRIVATE_KEY env var and no key file at $KEY_FILE"
+  echo "Generate one with: cargo tauri signer generate -w $KEY_FILE"
+  exit 1
 fi
 
 cd "$(git rev-parse --show-toplevel)"
@@ -53,8 +64,12 @@ sign_file() {
   fi
   echo "  [sign] $label"
   local out
-  if [ -n "${TAURI_SIGNING_PRIVATE_KEY:-}" ]; then
-    out=$(cargo tauri signer sign "$path" 2>/dev/null)
+  if [ -n "$TMP_KEY_FILE" ]; then
+    if [ -n "${TAURI_KEY_PASSWORD:-}" ]; then
+      out=$(cargo tauri signer sign -f "$TMP_KEY_FILE" -p "$TAURI_KEY_PASSWORD" "$path" 2>/dev/null)
+    else
+      out=$(cargo tauri signer sign -f "$TMP_KEY_FILE" "$path" 2>/dev/null)
+    fi
   else
     out=$(cargo tauri signer sign -f "$KEY_FILE" "$path" 2>/dev/null)
   fi

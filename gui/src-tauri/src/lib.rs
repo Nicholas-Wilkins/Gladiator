@@ -10,6 +10,7 @@ use std::sync::Mutex;
 #[cfg(target_os = "windows")]
 use std::time::{Duration, Instant};
 use tauri::Manager;
+use tauri_plugin_updater::UpdaterExt;
 
 #[cfg(target_os = "windows")]
 const CREATE_NO_WINDOW: u32 = 0x08000000;
@@ -1372,6 +1373,7 @@ pub fn run() {
                 progress: 0,
             })));
             let handle = app.handle().clone();
+            let updater_handle = handle.clone();
 
             if cfg!(debug_assertions) {
                 start_dev_server(&handle);
@@ -1387,6 +1389,24 @@ pub fn run() {
                     start_production_server(&handle);
                 });
             }
+
+            // Check for app updates on startup
+            tauri::async_runtime::spawn(async move {
+                match updater_handle.updater() {
+                    Ok(updater) => {
+                        match updater.check().await {
+                            Ok(Some(update)) => {
+                                let _ = update
+                                    .download_and_install(|_, _| {}, || {})
+                                    .await;
+                            }
+                            Ok(None) => {}
+                            Err(e) => eprintln!("Update check failed: {}", e),
+                        }
+                    }
+                    Err(e) => eprintln!("Updater init failed: {}", e),
+                }
+            });
 
             Ok(())
         })

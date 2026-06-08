@@ -51,7 +51,7 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDJCM0RFNUJDMzIxMEY1NUUKUldSZTlSQXl2T1U5S3hBZ0wraUVQS0g0dU9BVkZGQkpYY0lmTkQ1UGZFWi9ZaEhTSEU5NW14QTQK",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEI4OEUwMjNDQ0JEMjlFMjEKUldRaG50TExQQUtPdUlReDFpdURjZWRmUzN4RExHMVkzUmo5RnAzdm9OREVKemNPMmM1RWhnR2kK",
       "endpoints": [
         "https://github.com/Nicholas-Wilkins/Gladiator/releases/latest/download/latest.json"
       ],
