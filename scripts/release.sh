@@ -20,8 +20,8 @@ set -euo pipefail
 #   - Artifacts in the current directory or a BUNDLE_DIR override
 
 if [ $# -lt 1 ]; then
-  echo "Usage: $0 <version> [release notes file]"
-  echo "Example: $0 0.1.23"
+  echo "Usage: $0 <version> [release notes file]" >&2
+  echo "Example: $0 0.1.23" >&2
   exit 1
 fi
 
@@ -45,8 +45,8 @@ if [ -n "${TAURI_SIGNING_PRIVATE_KEY:-}" ]; then
   TMP_KEY_FILE=$(mktemp)
   printf '%s' "$TAURI_SIGNING_PRIVATE_KEY" > "$TMP_KEY_FILE"
 elif [ ! -f "$KEY_FILE" ]; then
-  echo "ERROR: No TAURI_SIGNING_PRIVATE_KEY env var and no key file at $KEY_FILE"
-  echo "Generate one with: cargo tauri signer generate -w $KEY_FILE"
+  echo "ERROR: No TAURI_SIGNING_PRIVATE_KEY env var and no key file at $KEY_FILE" >&2
+  echo "Generate one with: cargo tauri signer generate -w $KEY_FILE" >&2
   exit 1
 fi
 
@@ -59,21 +59,19 @@ sign_file() {
   local label="$1"
   local path="$2"
   if [ ! -f "$path" ]; then
-    echo "  [skip] $label — file not found: $path"
+    echo "  [skip] $label — file not found: $path" >&2
     return 1
   fi
-  echo "  [sign] $label"
+  echo "  [sign] $label" >&2
+  local password="${TAURI_KEY_PASSWORD:-}"
   local out
   if [ -n "$TMP_KEY_FILE" ]; then
-    if [ -n "${TAURI_KEY_PASSWORD:-}" ]; then
-      out=$(cargo tauri signer sign -f "$TMP_KEY_FILE" -p "$TAURI_KEY_PASSWORD" "$path" 2>/dev/null)
-    else
-      out=$(cargo tauri signer sign -f "$TMP_KEY_FILE" "$path" 2>/dev/null)
-    fi
+    out=$(cargo tauri signer sign -f "$TMP_KEY_FILE" -p "$password" "$path" 2>/dev/null)
   else
-    out=$(cargo tauri signer sign -f "$KEY_FILE" "$path" 2>/dev/null)
+    out=$(cargo tauri signer sign -f "$KEY_FILE" -p "$password" "$path" 2>/dev/null)
   fi
-  SIG["$label"]="$out"
+  # Extract just the signature line from the multi-line output
+  SIG["$label"]="$(echo "$out" | awk '/^Public signature:/{getline; print}')"
   return 0
 }
 
@@ -100,38 +98,38 @@ build_platform_json() {
 APPIMAGE_FILE="$BUNDLE_DIR/appimage/Gladiator_${VERSION}_amd64.AppImage"
 APPIMAGE_TGZ="$BUNDLE_DIR/appimage/Gladiator_${VERSION}_amd64.AppImage.tar.gz"
 if [ -f "$APPIMAGE_FILE" ]; then
-  echo "[1/4] Packaging AppImage tar.gz..."
+  echo "[1/4] Packaging AppImage tar.gz..." >&2
   tar czf "$APPIMAGE_TGZ" -C "$BUNDLE_DIR/appimage" "Gladiator_${VERSION}_amd64.AppImage"
   sign_file "linux-x86_64" "$APPIMAGE_TGZ" || true
 else
-  echo "[1/4] Skipping Linux AppImage — not found"
+  echo "[1/4] Skipping Linux AppImage — not found" >&2
 fi
 
 # ── Windows MSI ──────────────────────────────────────────────────
 MSI_FILE="$BUNDLE_DIR/msi/Gladiator_${VERSION}_x64_en-US.msi"
 if [ -f "$MSI_FILE" ]; then
-  echo "[2/4] Signing Windows MSI..."
+  echo "[2/4] Signing Windows MSI..." >&2
   sign_file "windows-x86_64" "$MSI_FILE" || true
 else
-  echo "[2/4] Skipping Windows MSI — not found"
+  echo "[2/4] Skipping Windows MSI — not found" >&2
 fi
 
 # ── macOS Intel DMG ──────────────────────────────────────────────
 DMG_X64="$BUNDLE_DIR/dmg/Gladiator_${VERSION}_x64.dmg"
 if [ -f "$DMG_X64" ]; then
-  echo "[3/4] Signing macOS Intel DMG..."
+  echo "[3/4] Signing macOS Intel DMG..." >&2
   sign_file "darwin-x86_64" "$DMG_X64" || true
 else
-  echo "[3/4] Skipping macOS Intel DMG — not found"
+  echo "[3/4] Skipping macOS Intel DMG — not found" >&2
 fi
 
 # ── macOS Apple Silicon DMG ──────────────────────────────────────
 DMG_AARCH64="$BUNDLE_DIR/dmg/Gladiator_${VERSION}_aarch64.dmg"
 if [ -f "$DMG_AARCH64" ]; then
-  echo "[4/4] Signing macOS Apple Silicon DMG..."
+  echo "[4/4] Signing macOS Apple Silicon DMG..." >&2
   sign_file "darwin-aarch64" "$DMG_AARCH64" || true
 else
-  echo "[4/4] Skipping macOS Apple Silicon DMG — not found"
+  echo "[4/4] Skipping macOS Apple Silicon DMG — not found" >&2
 fi
 
 # ── Generate latest.json ────────────────────────────────────────
@@ -154,6 +152,6 @@ ${PLATFORMS}
 }
 JSON
 
-echo ""
-echo "Done! Save the latest.json output above and upload it as a release asset."
-echo "Also upload any .tar.gz files created in the bundle directories."
+echo "" >&2
+echo "Done! Save the latest.json output above and upload it as a release asset." >&2
+echo "Also upload any .tar.gz files created in the bundle directories." >&2
