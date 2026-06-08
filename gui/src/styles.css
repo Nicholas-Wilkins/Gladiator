@@ -679,37 +679,28 @@ body.dragging-piece .play-board .sq.sd:hover { background: #8f9cb5 !important; }
   justify-content: space-between;
 }
 
-/* Walkthrough mascot */
+/* Walkthrough mascot — cartoon gladiator */
 .walkthrough-mascot {
   position: fixed;
-  bottom: 60px;
+  bottom: 40px;
   left: 50%;
   transform: translateX(-50%);
   z-index: 10000;
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  padding: 8px 16px;
-  background: var(--bg-tertiary);
-  border-radius: 20px;
-  border: 1px solid var(--border);
   animation: wtMascotIn 0.4s ease 0.15s both;
 }
+.walkthrough-mascot .gladiator-svg {
+  width: 96px;
+  height: 120px;
+  filter: drop-shadow(0 4px 10px rgba(0,0,0,0.3));
+  animation: wtGladIdle 2.5s ease-in-out infinite;
+}
 @keyframes wtMascotIn {
-  from { transform: translateX(-50%) translateY(8px); opacity: 0; }
+  from { transform: translateX(-50%) translateY(12px); opacity: 0; }
   to { transform: translateX(-50%) translateY(0); opacity: 1; }
 }
-.walkthrough-mascot .mascot-helmet {
-  font-size: 24px;
-  line-height: 1;
-}
-.walkthrough-mascot .mascot-face {
-  font-size: 22px;
-  line-height: 1;
-}
-.walkthrough-mascot .mascot-shield {
-  font-size: 22px;
-  line-height: 1;
+@keyframes wtGladIdle {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-4px); }
 }
 
 /* Element highlight ring — above overlay dim but below speech bubble */
@@ -726,8 +717,7 @@ body.dragging-piece .play-board .sq.sd:hover { background: #8f9cb5 !important; }
 /* Hidden state for walkthrough elements */
 #walkthrough-bubble.hidden,
 .walkthrough-mascot.hidden {
-  opacity: 0;
-  pointer-events: none;
+  display: none;
 }
 
 /* Help page */
