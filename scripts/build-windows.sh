@@ -22,10 +22,9 @@ REPO_ROOT="$(git rev-parse --show-toplevel)"
 cd "$REPO_ROOT"
 
 BACKEND_DIR="gui/src-tauri/backend"
-CONFIG_FILE="gui/src-tauri/tauri.conf.json"
 
 # ── Step 1: Create backend zip ───────────────────────────────────
-echo "[1/4] Creating backend source bundle..."
+echo "[1/3] Creating backend source bundle..."
 mkdir -p "$BACKEND_DIR"
 # Remove previous zip so stale contents don't linger
 rm -f "$BACKEND_DIR/gladiator-backend-windows.zip"
@@ -64,7 +63,7 @@ else
 fi
 
 # ── Step 2: Download uv.exe ──────────────────────────────────────
-echo "[2/4] Downloading uv.exe..."
+echo "[2/3] Downloading uv.exe..."
 UV_URL="https://github.com/astral-sh/uv/releases/download/0.5.0/uv-x86_64-pc-windows-msvc.zip"
 UV_ZIP="$(mktemp).zip"
 UV_TARGET="$BACKEND_DIR/uv.exe"
@@ -100,28 +99,15 @@ else
   fi
 fi
 
-# ── Step 3: Configure resources in tauri.conf.json ───────────────
-echo "[3/4] Adding backend resources to tauri.conf.json..."
-node -e "
-  const fs = require('fs');
-  const c = JSON.parse(fs.readFileSync('$CONFIG_FILE', 'utf8'));
-  if (Array.isArray(c.bundle.resources) && c.bundle.resources.length > 0) {
-    console.log('  resources already configured, skipping');
-  } else {
-    c.bundle.resources = [
-      'backend/gladiator-backend-windows.zip',
-      'backend/uv.exe'
-    ];
-    fs.writeFileSync('$CONFIG_FILE', JSON.stringify(c, null, 2) + '\n');
-    console.log('  OK: resources added to tauri.conf.json');
-  }
-"
+# ── Step 3: Build ────────────────────────────────────────────────
+# The zip and uv.exe in gui/src-tauri/backend/ are embedded into the
+# Rust binary via include_bytes!() at compile time — no tauri.conf.json
+# resource config needed.
 
-# ── Step 4: Build ────────────────────────────────────────────────
 if [ "$SKIP_BUILD" = "--skip-build" ]; then
-  echo "[4/4] Skipping build (--skip-build). Run manually: cd gui && cargo tauri build"
+  echo "[3/3] Skipping build (--skip-build). Run manually: cd gui && cargo tauri build"
 else
-  echo "[4/4] Building MSI installer..."
+  echo "[3/3] Building MSI installer..."
   cd gui
   cargo tauri build
 fi

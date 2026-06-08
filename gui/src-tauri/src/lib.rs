@@ -371,79 +371,90 @@ fn install_backend(dir: &PathBuf, app: &tauri::AppHandle) -> bool {
         preserve_user_data(&old_backend, &backup);
     }
 
-    update_status(
-        app,
-        "installing",
-        "Installing backend from installer resources\u{2026}",
-        5,
-    );
+    update_status(app, "installing", "Installing backend\u{2026}", 5);
 
     let zip_name = "gladiator-backend-windows.zip";
     let zip_path = dir.join(&zip_name);
 
-    let resource_path = app
-        .path()
-        .resource_dir()
-        .unwrap_or_else(|_| PathBuf::from("."))
-        .join("backend")
-        .join(zip_name);
-
-    if !resource_path.exists() {
-        update_status(
-            app,
-            "error",
-            &format!(
-                "Backend bundle not found at {}. The installer may be corrupted.",
-                resource_path.display()
-            ),
-            0,
-        );
-        try_restore_user_data(&backup, &old_backend);
-        return false;
-    }
-
-    // Retry the copy (Defender may briefly lock the freshly-extracted resource).
-    let mut last_err = String::new();
-    for attempt in 1..=10 {
-        match std::fs::OpenOptions::new().read(true).open(&resource_path) {
-            Ok(f) => drop(f),
-            Err(e) => {
-                last_err = format!("{}", e);
-                eprintln!(
-                    "[gladiator-gui] Resource not accessible (attempt {}/10): {}",
-                    attempt, last_err
-                );
-                std::thread::sleep(std::time::Duration::from_secs(2));
-                continue;
-            }
-        }
-        match std::fs::copy(&resource_path, &zip_path) {
-            Ok(_) => {
-                last_err.clear();
-                break;
-            }
-            Err(e) => {
-                last_err = format!("{}", e);
-                eprintln!(
-                    "[gladiator-gui] Copy attempt {}/10 failed: {}",
-                    attempt, last_err
-                );
-                std::thread::sleep(std::time::Duration::from_secs(2));
-            }
+    #[cfg(has_backend_zip)]
+    {
+        let data = include_bytes!("../backend/gladiator-backend-windows.zip");
+        if let Err(e) = std::fs::write(&zip_path, data) {
+            update_status(
+                app,
+                "error",
+                &format!("Failed to write embedded backend: {}", e),
+                0,
+            );
+            try_restore_user_data(&backup, &old_backend);
+            return false;
         }
     }
-    if !last_err.is_empty() {
-        update_status(
-            app,
-            "error",
-            &format!(
-                "Failed to copy backend bundle from installer resources: {}",
-                last_err
-            ),
-            0,
-        );
-        try_restore_user_data(&backup, &old_backend);
-        return false;
+    #[cfg(not(has_backend_zip))]
+    {
+        let resource_path = app
+            .path()
+            .resource_dir()
+            .unwrap_or_else(|_| PathBuf::from("."))
+            .join("backend")
+            .join(zip_name);
+
+        if !resource_path.exists() {
+            update_status(
+                app,
+                "error",
+                &format!(
+                    "Backend bundle not found at {}. The installer may be corrupted.",
+                    resource_path.display()
+                ),
+                0,
+            );
+            try_restore_user_data(&backup, &old_backend);
+            return false;
+        }
+
+        let mut last_err = String::new();
+        for attempt in 1..=10 {
+            match std::fs::OpenOptions::new().read(true).open(&resource_path) {
+                Ok(f) => drop(f),
+                Err(e) => {
+                    last_err = format!("{}", e);
+                    eprintln!(
+                        "[gladiator-gui] Resource not accessible (attempt {}/10): {}",
+                        attempt, last_err
+                    );
+                    std::thread::sleep(std::time::Duration::from_secs(2));
+                    continue;
+                }
+            }
+            match std::fs::copy(&resource_path, &zip_path) {
+                Ok(_) => {
+                    last_err.clear();
+                    break;
+                }
+                Err(e) => {
+                    last_err = format!("{}", e);
+                    eprintln!(
+                        "[gladiator-gui] Copy attempt {}/10 failed: {}",
+                        attempt, last_err
+                    );
+                    std::thread::sleep(std::time::Duration::from_secs(2));
+                }
+            }
+        }
+        if !last_err.is_empty() {
+            update_status(
+                app,
+                "error",
+                &format!(
+                    "Failed to copy backend bundle from installer resources: {}",
+                    last_err
+                ),
+                0,
+            );
+            try_restore_user_data(&backup, &old_backend);
+            return false;
+        }
     }
 
     // Extract the source bundle into the backend directory.
@@ -457,72 +468,92 @@ fn install_backend(dir: &PathBuf, app: &tauri::AppHandle) -> bool {
     let _ = std::fs::remove_file(&zip_path);
     try_restore_user_data(&backup, &backend_dir);
 
-    // Copy uv.exe from installer resources.
     let uv_path = dir.join("uv.exe");
-    let uv_resource = app
-        .path()
-        .resource_dir()
-        .unwrap_or_else(|_| PathBuf::from("."))
-        .join("backend")
-        .join("uv.exe");
-    if !uv_resource.exists() {
-        update_status(
-            app,
-            "error",
-            &format!(
-                "uv.exe not found at {}. The installer may be corrupted.",
-                uv_resource.display()
-            ),
-            0,
-        );
-        try_restore_user_data(&backup, &old_backend);
-        return false;
-    }
-    let mut last_err = String::new();
-    for attempt in 1..=10 {
-        match std::fs::OpenOptions::new().read(true).open(&uv_resource) {
-            Ok(f) => drop(f),
-            Err(e) => {
-                last_err = format!("{}", e);
-                eprintln!(
-                    "[gladiator-gui] uv.exe not accessible (attempt {}/10): {}",
-                    attempt, last_err
-                );
-                std::thread::sleep(std::time::Duration::from_secs(2));
-                continue;
-            }
-        }
-        match std::fs::copy(&uv_resource, &uv_path) {
-            Ok(_) => {
-                last_err.clear();
-                break;
-            }
-            Err(e) => {
-                last_err = format!("{}", e);
-                eprintln!(
-                    "[gladiator-gui] uv.exe copy attempt {}/10 failed: {}",
-                    attempt, last_err
-                );
-                std::thread::sleep(std::time::Duration::from_secs(2));
-            }
+    #[cfg(has_uv_exe)]
+    {
+        let data = include_bytes!("../backend/uv.exe");
+        if let Err(e) = std::fs::write(&uv_path, data) {
+            update_status(
+                app,
+                "error",
+                &format!("Failed to write embedded uv.exe: {}", e),
+                0,
+            );
+            try_restore_user_data(&backup, &old_backend);
+            return false;
         }
     }
-    if !last_err.is_empty() {
-        update_status(
-            app,
-            "error",
-            &format!("Failed to copy uv.exe from resources: {}", last_err),
-            0,
-        );
-        try_restore_user_data(&backup, &old_backend);
-        return false;
+    #[cfg(not(has_uv_exe))]
+    {
+        let uv_resource = app
+            .path()
+            .resource_dir()
+            .unwrap_or_else(|_| PathBuf::from("."))
+            .join("backend")
+            .join("uv.exe");
+        if !uv_resource.exists() {
+            update_status(
+                app,
+                "error",
+                &format!(
+                    "uv.exe not found at {}. The installer may be corrupted.",
+                    uv_resource.display()
+                ),
+                0,
+            );
+            try_restore_user_data(&backup, &old_backend);
+            return false;
+        }
+        let mut last_err = String::new();
+        for attempt in 1..=10 {
+            match std::fs::OpenOptions::new().read(true).open(&uv_resource) {
+                Ok(f) => drop(f),
+                Err(e) => {
+                    last_err = format!("{}", e);
+                    eprintln!(
+                        "[gladiator-gui] uv.exe not accessible (attempt {}/10): {}",
+                        attempt, last_err
+                    );
+                    std::thread::sleep(std::time::Duration::from_secs(2));
+                    continue;
+                }
+            }
+            match std::fs::copy(&uv_resource, &uv_path) {
+                Ok(_) => {
+                    last_err.clear();
+                    break;
+                }
+                Err(e) => {
+                    last_err = format!("{}", e);
+                    eprintln!(
+                        "[gladiator-gui] uv.exe copy attempt {}/10 failed: {}",
+                        attempt, last_err
+                    );
+                    std::thread::sleep(std::time::Duration::from_secs(2));
+                }
+            }
+        }
+        if !last_err.is_empty() {
+            update_status(
+                app,
+                "error",
+                &format!("Failed to copy uv.exe from resources: {}", last_err),
+                0,
+            );
+            try_restore_user_data(&backup, &old_backend);
+            return false;
+        }
     }
 
     // Create virtual environment with uv (downloads Python if needed).
     update_status(app, "venv", "Creating virtual environment\u{2026}", 40);
     let venv_dir = dir.join(".venv");
     if venv_dir.exists() {
-        let _ = std::fs::remove_dir_all(&venv_dir);
+        let old = dir.join(".venv.old");
+        let _ = std::fs::remove_dir_all(&old);
+        if std::fs::rename(&venv_dir, &old).is_err() {
+            let _ = std::fs::remove_dir_all(&venv_dir);
+        }
     }
     let mut venv_cmd = cmd(&uv_path.to_string_lossy());
     venv_cmd.args([
@@ -666,7 +697,11 @@ fn start_production_server(app_handle: &tauri::AppHandle) {
         if uv_path.exists() {
             eprintln!("[gladiator-gui] venv broken, recreating with uv");
             if venv_dir.exists() {
-                let _ = std::fs::remove_dir_all(&venv_dir);
+                let old = dir.join(".venv.old");
+                let _ = std::fs::remove_dir_all(&old);
+                if std::fs::rename(&venv_dir, &old).is_err() {
+                    let _ = std::fs::remove_dir_all(&venv_dir);
+                }
             }
             let mut venv_cmd = cmd(&uv_path.to_string_lossy());
             venv_cmd.args([
@@ -1058,7 +1093,11 @@ fn install_backend(dir: &PathBuf, app: &tauri::AppHandle) -> bool {
     update_status(app, "venv", "Creating virtual environment\u{2026}", 45);
     let venv_dir = dir.join(".venv");
     if venv_dir.exists() {
-        let _ = std::fs::remove_dir_all(&venv_dir);
+        let old = dir.join(".venv.old");
+        let _ = std::fs::remove_dir_all(&old);
+        if std::fs::rename(&venv_dir, &old).is_err() {
+            let _ = std::fs::remove_dir_all(&venv_dir);
+        }
     }
     let mut venv_cmd = Command::new(&uv_path);
     venv_cmd.args([
@@ -1202,7 +1241,11 @@ fn start_production_server(app_handle: &tauri::AppHandle) {
         if uv_path.exists() {
             eprintln!("[gladiator-gui] venv broken, recreating with uv");
             if venv_dir.exists() {
-                let _ = std::fs::remove_dir_all(&venv_dir);
+                let old = dir.join(".venv.old");
+                let _ = std::fs::remove_dir_all(&old);
+                if std::fs::rename(&venv_dir, &old).is_err() {
+                    let _ = std::fs::remove_dir_all(&venv_dir);
+                }
             }
             let mut venv_cmd = Command::new(&uv_path);
             venv_cmd.args([
