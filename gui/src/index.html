@@ -216,28 +216,26 @@
   </main>
 </div>
 
-<div id="walkthrough-overlay" class="hidden">
-  <div id="walkthrough-arrow"></div>
-  <div id="walkthrough-bubble" class="wt-speech">
-    <div class="walkthrough-header">
-      <span class="walkthrough-step-indicator" id="walkthrough-step"></span>
-      <button id="walkthrough-close" class="btn" style="border:none;background:none;font-size:20px;line-height:1;padding:4px 8px;color:var(--text-dim)">&times;</button>
-    </div>
-    <div class="walkthrough-body">
-      <h3 id="walkthrough-title"></h3>
-      <p id="walkthrough-text"></p>
-    </div>
-    <div class="walkthrough-footer">
-      <button id="walkthrough-prev" class="btn">&#8592; Back</button>
-      <button id="walkthrough-next" class="btn primary">Next &#8594;</button>
-      <button id="walkthrough-done" class="btn primary" style="display:none">Done</button>
-    </div>
+<div id="walkthrough-overlay" class="hidden"></div>
+<div id="walkthrough-bubble" class="wt-speech hidden">
+  <div class="walkthrough-header">
+    <span class="walkthrough-step-indicator" id="walkthrough-step"></span>
+    <button id="walkthrough-close" class="btn" style="border:none;background:none;font-size:20px;line-height:1;padding:4px 8px;color:var(--text-dim)">&times;</button>
   </div>
-  <div class="walkthrough-mascot">
-    <span class="mascot-helmet">&#9937;</span>
-    <span class="mascot-face">&#128522;</span>
-    <span class="mascot-shield">&#128481;</span>
+  <div class="walkthrough-body">
+    <h3 id="walkthrough-title"></h3>
+    <p id="walkthrough-text"></p>
   </div>
+  <div class="walkthrough-footer">
+    <button id="walkthrough-prev" class="btn">&#8592; Back</button>
+    <button id="walkthrough-next" class="btn primary">Next &#8594;</button>
+    <button id="walkthrough-done" class="btn primary" style="display:none">Done</button>
+  </div>
+</div>
+<div class="walkthrough-mascot hidden">
+  <span class="mascot-helmet">&#9937;</span>
+  <span class="mascot-face">&#128522;</span>
+  <span class="mascot-shield">&#128481;</span>
 </div>
 
 <div id="toast-container"></div>

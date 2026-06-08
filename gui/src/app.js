@@ -1010,9 +1010,32 @@ const WT = {
   ],
 };
 
+// Starting chess position for walkthrough play tab demo
+function _wtStartingBoard() {
+  const p = (sq, sym, color) => ({ sq, piece: { symbol: sym, color } });
+  const e = sq => ({ sq, piece: null });
+  return {
+    rows: [
+      [p(56,'♜','black'),p(57,'♞','black'),p(58,'♝','black'),p(59,'♛','black'),p(60,'♚','black'),p(61,'♝','black'),p(62,'♞','black'),p(63,'♜','black')],
+      [p(48,'♟','black'),p(49,'♟','black'),p(50,'♟','black'),p(51,'♟','black'),p(52,'♟','black'),p(53,'♟','black'),p(54,'♟','black'),p(55,'♟','black')],
+      [e(40),e(41),e(42),e(43),e(44),e(45),e(46),e(47)],
+      [e(32),e(33),e(34),e(35),e(36),e(37),e(38),e(39)],
+      [e(24),e(25),e(26),e(27),e(28),e(29),e(30),e(31)],
+      [e(16),e(17),e(18),e(19),e(20),e(21),e(22),e(23)],
+      [p(8,'♙','white'),p(9,'♙','white'),p(10,'♙','white'),p(11,'♙','white'),p(12,'♙','white'),p(13,'♙','white'),p(14,'♙','white'),p(15,'♙','white')],
+      [p(0,'♖','white'),p(1,'♘','white'),p(2,'♗','white'),p(3,'♕','white'),p(4,'♔','white'),p(5,'♗','white'),p(6,'♘','white'),p(7,'♖','white')],
+    ],
+    turn: 'white',
+    legal_moves: [],
+    last_move_sq: null,
+    is_game_over: false,
+  };
+}
+
 let _wtSteps = [];
 let _wtStep = 0;
 let _wtHighlighted = null;
+let _wtSavedPlayState = null;
 
 function clearHighlight() {
   if (_wtHighlighted) {
@@ -1021,8 +1044,22 @@ function clearHighlight() {
   }
 }
 
+function wtShow() {
+  $("#walkthrough-overlay").classList.remove("hidden");
+  $("#walkthrough-bubble").classList.remove("hidden");
+  document.querySelector(".walkthrough-mascot").classList.remove("hidden");
+}
+
+function wtHide() {
+  $("#walkthrough-overlay").classList.add("hidden");
+  $("#walkthrough-bubble").classList.add("hidden");
+  document.querySelector(".walkthrough-mascot").classList.add("hidden");
+}
+
 function startWalkthrough(tab) {
   clearHighlight();
+  // Save play state if we might need to restore it
+  _wtSavedPlayState = _playBoardState;
   if (tab) {
     _wtSteps = WT[tab] ? WT[tab].map(s => ({ ...s, tab })) : [];
   } else {
@@ -1046,13 +1083,27 @@ function showWTStep(idx) {
   const navBtn = document.querySelector(`.nav-btn[data-page="${step.tab}"]`);
   if (navBtn) navBtn.click();
 
-  // Special handling: play tab steps 1+ need the game screen visible
-  if (step.tab === "play" && step.target === "#play-color-label") {
-    // Show game area (bot list hidden, no-bot hidden)
-    $("#play-no-bot").style.display = "none";
-    $("#play-bot-list").style.display = "none";
-    $("#play-game-area").style.display = "flex";
-    $("#play-bot-info").style.display = "none";
+  // Play tab: first step shows choose-opponent, later steps show game area
+  if (step.tab === "play") {
+    const firstIdx = _wtSteps.findIndex(s => s.tab === "play");
+    if (idx === firstIdx) {
+      // Restore initial choose-opponent view
+      if (!_playGameId) {
+        $("#play-no-bot").style.display = "block";
+        $("#play-game-area").style.display = "none";
+        $("#play-bot-list").style.display = "none";
+        $("#play-bot-info").style.display = "none";
+      }
+    } else {
+      // Show game area with a demo starting position
+      $("#play-no-bot").style.display = "none";
+      $("#play-bot-list").style.display = "none";
+      $("#play-game-area").style.display = "flex";
+      $("#play-bot-info").style.display = "none";
+      // Temporarily show a starting board for the walkthrough
+      _playBoardState = _wtStartingBoard();
+      renderPlayBoard();
+    }
   }
 
   // Update bubble
@@ -1078,26 +1129,28 @@ function showWTStep(idx) {
     if (el) {
       el.classList.add("wt-highlight");
       _wtHighlighted = el;
-      // Scroll into view if needed
       el.scrollIntoView({ block: "nearest", behavior: "smooth" });
     }
   }
 
-  $("#walkthrough-overlay").classList.remove("hidden");
+  wtShow();
   _wtStep = idx;
 }
 
 function endWT() {
   clearHighlight();
-  // Reset play tab to initial state if it was modified
+  // Restore play state if we changed it
   if (_wtSteps.length && _wtSteps.some(s => s.tab === "play")) {
-    if (!_playGameId) {
+    _playBoardState = _wtSavedPlayState;
+    if (_playBoardState) {
+      renderPlayBoard();
+    } else if (!_playGameId) {
       $("#play-no-bot").style.display = "block";
       $("#play-game-area").style.display = "none";
     }
   }
   _wtSteps = [];
-  $("#walkthrough-overlay").classList.add("hidden");
+  wtHide();
 }
 
 // Handlers

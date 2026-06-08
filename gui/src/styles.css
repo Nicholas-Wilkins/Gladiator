@@ -590,24 +590,26 @@ body.dragging-piece .play-board .sq.sd:hover { background: #8f9cb5 !important; }
   justify-content: center;
 }
 
-/* Walkthrough overlay */
+/* Walkthrough overlay — just the dim backdrop */
 #walkthrough-overlay {
   position: fixed;
   inset: 0;
   background: rgba(0,0,0,0.6);
   z-index: 9998;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
   transition: opacity 0.3s;
 }
 #walkthrough-overlay.hidden {
   opacity: 0;
   pointer-events: none;
 }
-#walkthrough-overlay .wt-speech {
-  position: relative;
+
+/* Walkthrough speech bubble — separate from overlay so it stacks above highlights */
+#walkthrough-bubble {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 10001;
   background: var(--bg-secondary);
   border: 2px solid var(--accent);
   border-radius: 16px;
@@ -616,7 +618,7 @@ body.dragging-piece .play-board .sq.sd:hover { background: #8f9cb5 !important; }
   box-shadow: 0 8px 32px rgba(0,0,0,0.5);
   animation: wtFadeIn 0.3s ease;
 }
-#walkthrough-overlay .wt-speech::after {
+#walkthrough-bubble::after {
   content: "";
   position: absolute;
   bottom: -16px;
@@ -626,7 +628,7 @@ body.dragging-piece .play-board .sq.sd:hover { background: #8f9cb5 !important; }
   border-top-color: var(--accent);
   border-bottom: none;
 }
-#walkthrough-overlay .wt-speech::before {
+#walkthrough-bubble::before {
   content: "";
   position: absolute;
   bottom: -12px;
@@ -638,8 +640,8 @@ body.dragging-piece .play-board .sq.sd:hover { background: #8f9cb5 !important; }
   z-index: 1;
 }
 @keyframes wtFadeIn {
-  from { transform: translateY(12px); opacity: 0; }
-  to { transform: translateY(0); opacity: 1; }
+  from { transform: translate(-50%, calc(-50% + 12px)); opacity: 0; }
+  to { transform: translate(-50%, -50%); opacity: 1; }
 }
 .walkthrough-header {
   display: flex;
@@ -679,10 +681,14 @@ body.dragging-piece .play-board .sq.sd:hover { background: #8f9cb5 !important; }
 
 /* Walkthrough mascot */
 .walkthrough-mascot {
+  position: fixed;
+  bottom: 60px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 10000;
   display: flex;
   align-items: center;
   gap: 4px;
-  margin-top: 20px;
   padding: 8px 16px;
   background: var(--bg-tertiary);
   border-radius: 20px;
@@ -690,8 +696,8 @@ body.dragging-piece .play-board .sq.sd:hover { background: #8f9cb5 !important; }
   animation: wtMascotIn 0.4s ease 0.15s both;
 }
 @keyframes wtMascotIn {
-  from { transform: translateY(8px); opacity: 0; }
-  to { transform: translateY(0); opacity: 1; }
+  from { transform: translateX(-50%) translateY(8px); opacity: 0; }
+  to { transform: translateX(-50%) translateY(0); opacity: 1; }
 }
 .walkthrough-mascot .mascot-helmet {
   font-size: 24px;
@@ -706,7 +712,7 @@ body.dragging-piece .play-board .sq.sd:hover { background: #8f9cb5 !important; }
   line-height: 1;
 }
 
-/* Element highlight ring */
+/* Element highlight ring — above overlay dim but below speech bubble */
 .wt-highlight {
   position: relative;
   z-index: 9999;
@@ -715,6 +721,13 @@ body.dragging-piece .play-board .sq.sd:hover { background: #8f9cb5 !important; }
 @keyframes wtPulse {
   0%, 100% { box-shadow: 0 0 0 3px var(--accent), 0 0 12px rgba(76,154,255,0.3); }
   50% { box-shadow: 0 0 0 6px var(--accent), 0 0 24px rgba(76,154,255,0.5); }
+}
+
+/* Hidden state for walkthrough elements */
+#walkthrough-bubble.hidden,
+.walkthrough-mascot.hidden {
+  opacity: 0;
+  pointer-events: none;
 }
 
 /* Help page */
