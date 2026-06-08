@@ -982,6 +982,146 @@ document.addEventListener("mousemove", handleDocMouseMove);
 document.addEventListener("mouseup", handleDocMouseUp);
 
 // ---------------------------------------------------------------------------
+// Walkthrough — per-tab guided tours with gladiator mascot
+// ---------------------------------------------------------------------------
+
+const WT = {
+  dashboard: [
+    { target: ".engine-grid", title: "Engine Cards", text: "Each card shows one engine variant — CPU Heuristic, Neural Network, Mini, or NN Mini. The mode (RANDOM/MUTATION), consecutive wins, match count, and generation tell you how the champion is performing." },
+    { target: "#session-list", title: "Active Sessions", text: "Running training sessions appear here. You can see the current match board, engine type, worker ID, and stop a session if needed." },
+  ],
+  training: [
+    { target: "#tr-engine", title: "Engine Type", text: "Choose which engine to train. CPU Heuristic is fast and runs anywhere. Neural Network learns patterns but benefits from a GPU. Mini variants are lightweight for quick experiments." },
+    { target: "#tr-workers", title: "Workers", text: "Run multiple training workers in parallel. Each worker gets its own RNG stream so they explore different challengers simultaneously." },
+    { target: "#tr-max-games", title: "Max Games", text: "Optionally stop training after a set number of games. Leave empty to run until you stop it manually." },
+    { target: "#btn-start", title: "Start Training", text: "Click to launch training with your settings. A new session appears below where you can watch the current match and stop when ready." },
+  ],
+  champion: [
+    { target: "#champion-card", title: "Champion Stats", text: "The current champion's ID, training mode, generation, wins, and total matches. The champion is the best bot found so far." },
+    { target: "#ch-export", title: "Export Bot", text: "Export the champion as a standalone UCI engine script. You can then play against it in the Play tab or use it with any UCI-compatible chess GUI." },
+    { target: "#ch-promote", title: "Promote to Mutation", text: "Once your champion is strong, promote it to MUTATION mode. Future challengers will be evolved variants of the champion rather than random bots, focusing on refinement." },
+    { target: "#lineage-table", title: "Lineage", text: "Every champion change is recorded here. You can trace the full history of which bot held the crown and when." },
+  ],
+  play: [
+    { target: "#play-no-bot", title: "Choose an Opponent", text: "First, pick an exported bot to play against. Click this button to browse available bots." },
+    { target: "#play-color-label", title: "Play as", text: "Choose to play as White or Black. If you pick Black, the bot will make the first move." },
+    { target: "#play-difficulty-label", title: "Time to Think", text: "Controls how deep the bot searches. Low = depth 2 (fast, weaker), Medium = depth 3, High = depth 4 (slower, stronger)." },
+    { target: "#play-reset", title: "Reset Game", text: "Start a new game against the same opponent. Your color and difficulty settings carry over." },
+  ],
+};
+
+let _wtSteps = [];
+let _wtStep = 0;
+let _wtHighlighted = null;
+
+function clearHighlight() {
+  if (_wtHighlighted) {
+    _wtHighlighted.classList.remove("wt-highlight");
+    _wtHighlighted = null;
+  }
+}
+
+function startWalkthrough(tab) {
+  clearHighlight();
+  if (tab) {
+    _wtSteps = WT[tab] ? WT[tab].map(s => ({ ...s, tab })) : [];
+  } else {
+    _wtSteps = [];
+    for (const [t, steps] of Object.entries(WT)) {
+      for (const s of steps) _wtSteps.push({ ...s, tab: t });
+    }
+  }
+  if (!_wtSteps.length) return;
+  _wtStep = 0;
+  localStorage.setItem("gladiator_wt_done", "true");
+  showWTStep(0);
+}
+
+function showWTStep(idx) {
+  clearHighlight();
+  const step = _wtSteps[idx];
+  if (!step) { endWT(); return; }
+
+  // Switch tab
+  const navBtn = document.querySelector(`.nav-btn[data-page="${step.tab}"]`);
+  if (navBtn) navBtn.click();
+
+  // Special handling: play tab steps 1+ need the game screen visible
+  if (step.tab === "play" && step.target === "#play-color-label") {
+    // Show game area (bot list hidden, no-bot hidden)
+    $("#play-no-bot").style.display = "none";
+    $("#play-bot-list").style.display = "none";
+    $("#play-game-area").style.display = "flex";
+    $("#play-bot-info").style.display = "none";
+  }
+
+  // Update bubble
+  const total = _wtSteps.length;
+  const label = total === 1 ? "" : `${idx + 1} of ${total}`;
+  $("#walkthrough-step").textContent = label;
+  $("#walkthrough-title").textContent = step.title;
+  $("#walkthrough-text").textContent = step.text;
+
+  // Navigation
+  $("#walkthrough-prev").style.display = idx === 0 ? "none" : "";
+  if (idx < total - 1) {
+    $("#walkthrough-next").style.display = "";
+    $("#walkthrough-done").style.display = "none";
+  } else {
+    $("#walkthrough-next").style.display = "none";
+    $("#walkthrough-done").style.display = "";
+  }
+
+  // Highlight target element
+  if (step.target) {
+    const el = document.querySelector(step.target);
+    if (el) {
+      el.classList.add("wt-highlight");
+      _wtHighlighted = el;
+      // Scroll into view if needed
+      el.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    }
+  }
+
+  $("#walkthrough-overlay").classList.remove("hidden");
+  _wtStep = idx;
+}
+
+function endWT() {
+  clearHighlight();
+  // Reset play tab to initial state if it was modified
+  if (_wtSteps.length && _wtSteps.some(s => s.tab === "play")) {
+    if (!_playGameId) {
+      $("#play-no-bot").style.display = "block";
+      $("#play-game-area").style.display = "none";
+    }
+  }
+  _wtSteps = [];
+  $("#walkthrough-overlay").classList.add("hidden");
+}
+
+// Handlers
+$("#walkthrough-next").addEventListener("click", () => {
+  if (_wtStep < _wtSteps.length - 1) showWTStep(_wtStep + 1);
+});
+$("#walkthrough-prev").addEventListener("click", () => {
+  if (_wtStep > 0) showWTStep(_wtStep - 1);
+});
+$("#walkthrough-close").addEventListener("click", endWT);
+$("#walkthrough-done").addEventListener("click", endWT);
+
+// Per-tab walkthrough buttons
+$$(".wt-replay").forEach(btn => {
+  btn.addEventListener("click", () => startWalkthrough(btn.dataset.tab || undefined));
+});
+
+// Auto-show full walkthrough on first load
+function maybeShowWalkthrough() {
+  if (!localStorage.getItem("gladiator_wt_done")) {
+    setTimeout(() => startWalkthrough(), 800);
+  }
+}
+
 // Auto-refresh dashboard
 // ---------------------------------------------------------------------------
 
@@ -996,3 +1136,4 @@ setInterval(() => {
 
 connectWS();
 refreshDashboard();
+maybeShowWalkthrough();

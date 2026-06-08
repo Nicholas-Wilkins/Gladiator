@@ -36,6 +36,9 @@
       <button class="nav-btn" data-page="play">
         <span class="nav-icon">&#9823;</span> Play
       </button>
+      <button class="nav-btn" data-page="help" style="margin-top:auto;border-top:1px solid var(--border);padding-top:10px">
+        <span class="nav-icon">&#63;</span> Help
+      </button>
     </nav>
     <div class="sidebar-status">
       <span id="conn-status" class="status-dot offline"></span>
@@ -157,14 +160,14 @@
         </div>
         <div id="play-sidebar">
           <div class="form-row">
-            <label for="play-color">Play as</label>
+            <label for="play-color" id="play-color-label">Play as</label>
             <select id="play-color">
               <option value="white">White</option>
               <option value="black">Black</option>
             </select>
           </div>
           <div class="form-row">
-            <label for="play-difficulty">Time to think</label>
+            <label for="play-difficulty" id="play-difficulty-label">Time to think</label>
             <select id="play-difficulty">
               <option value="high">High</option>
               <option value="medium" selected>Medium</option>
@@ -179,7 +182,62 @@
         </div>
       </div>
     </section>
+
+    <!-- Help -->
+    <section id="page-help" class="page">
+      <header><h2>Help</h2></header>
+      <div class="section-card">
+        <h3>Welcome to Gladiator</h3>
+        <p style="font-size:14px;line-height:1.6;color:var(--text-secondary);margin-bottom:16px">
+          Gladiator is a self-improving chess engine that trains champions through
+          evolutionary competition. New challengers are generated and face the
+          reigning champion — winners take the crown and the cycle continues.
+        </p>
+        <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px">
+          <button class="btn wt-replay" data-tab="" style="font-size:14px;padding:10px 20px;border-color:var(--accent);color:var(--accent)">&#9654; Full Walkthrough</button>
+          <button class="btn wt-replay" data-tab="dashboard">&#9632; Dashboard</button>
+          <button class="btn wt-replay" data-tab="training">&#9654; Training</button>
+          <button class="btn wt-replay" data-tab="champion">&#9733; Champions</button>
+          <button class="btn wt-replay" data-tab="play">&#9823; Play</button>
+        </div>
+      </div>
+      <div class="section-card">
+        <h3>Quick Reference</h3>
+        <div style="display:grid;gap:12px;font-size:14px;color:var(--text-secondary);line-height:1.6">
+          <div><strong style="color:var(--text)">Dashboard</strong> — Overview of all engine variants and their champions. Shows active training sessions.</div>
+          <div><strong style="color:var(--text)">Training</strong> — Start training sessions. CPU Heuristic is fastest; Neural Network learns patterns but needs a GPU. Multiple workers train in parallel.</div>
+          <div><strong style="color:var(--text)">Champions</strong> — View champion stats, lineage, and match history. Export a bot to play against, or promote to MUTATION mode.</div>
+          <div><strong style="color:var(--text)">Play</strong> — Play chess against exported bots. Low=2, Medium=3, High=4 depth search. Click or drag to move pieces.</div>
+          <div><strong style="color:var(--text)">RANDOM mode</strong> — Challengers are generated from scratch each generation.</div>
+          <div><strong style="color:var(--text)">MUTATION mode</strong> — After 100 random wins, challengers become mutations of the champion. Training focuses on refinement.</div>
+        </div>
+      </div>
+    </section>
   </main>
+</div>
+
+<div id="walkthrough-overlay" class="hidden">
+  <div id="walkthrough-arrow"></div>
+  <div id="walkthrough-bubble" class="wt-speech">
+    <div class="walkthrough-header">
+      <span class="walkthrough-step-indicator" id="walkthrough-step"></span>
+      <button id="walkthrough-close" class="btn" style="border:none;background:none;font-size:20px;line-height:1;padding:4px 8px;color:var(--text-dim)">&times;</button>
+    </div>
+    <div class="walkthrough-body">
+      <h3 id="walkthrough-title"></h3>
+      <p id="walkthrough-text"></p>
+    </div>
+    <div class="walkthrough-footer">
+      <button id="walkthrough-prev" class="btn">&#8592; Back</button>
+      <button id="walkthrough-next" class="btn primary">Next &#8594;</button>
+      <button id="walkthrough-done" class="btn primary" style="display:none">Done</button>
+    </div>
+  </div>
+  <div class="walkthrough-mascot">
+    <span class="mascot-helmet">&#9937;</span>
+    <span class="mascot-face">&#128522;</span>
+    <span class="mascot-shield">&#128481;</span>
+  </div>
 </div>
 
 <div id="toast-container"></div>
