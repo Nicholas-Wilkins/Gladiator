@@ -522,10 +522,7 @@ fn install_backend(dir: &PathBuf, app: &tauri::AppHandle) -> bool {
     update_status(app, "venv", "Creating virtual environment\u{2026}", 40);
     let venv_dir = dir.join(".venv");
     if venv_dir.exists() {
-        let py = venv_python(&venv_dir);
-        if !py.exists() || !python_stdlib_ok(&py) {
-            let _ = std::fs::remove_dir_all(&venv_dir);
-        }
+        let _ = std::fs::remove_dir_all(&venv_dir);
     }
     let mut venv_cmd = cmd(&uv_path.to_string_lossy());
     venv_cmd.args([
@@ -1061,10 +1058,7 @@ fn install_backend(dir: &PathBuf, app: &tauri::AppHandle) -> bool {
     update_status(app, "venv", "Creating virtual environment\u{2026}", 45);
     let venv_dir = dir.join(".venv");
     if venv_dir.exists() {
-        let py = venv_python(&venv_dir);
-        if !py.exists() || !python_stdlib_ok(&py) {
-            let _ = std::fs::remove_dir_all(&venv_dir);
-        }
+        let _ = std::fs::remove_dir_all(&venv_dir);
     }
     let mut venv_cmd = Command::new(&uv_path);
     venv_cmd.args([
