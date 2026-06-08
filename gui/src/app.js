@@ -20,6 +20,7 @@ function hideSetup() {
   if (!setupOverlay) return;
   setupOverlay.classList.add("hidden");
   setupResolved = true;
+  maybeShowWalkthrough();
 }
 
 function tryHideSetup() {
@@ -1160,10 +1161,10 @@ $$(".wt-replay").forEach(btn => {
   btn.addEventListener("click", () => startWalkthrough(btn.dataset.tab || undefined));
 });
 
-// Auto-show full walkthrough on first load
+// Auto-show full walkthrough on first load (after setup completes)
 function maybeShowWalkthrough() {
   if (!localStorage.getItem("gladiator_wt_done")) {
-    setTimeout(() => startWalkthrough(), 800);
+    setTimeout(() => startWalkthrough(), 600);
   }
 }
 
@@ -1181,4 +1182,3 @@ setInterval(() => {
 
 connectWS();
 refreshDashboard();
-maybeShowWalkthrough();
