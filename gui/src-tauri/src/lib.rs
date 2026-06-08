@@ -363,6 +363,16 @@ fn is_backend_installed(dir: &PathBuf) -> bool {
 fn install_backend(dir: &PathBuf, app: &tauri::AppHandle) -> bool {
     eprintln!("[gladiator-gui] Installing backend to {}", dir.display());
 
+    if let Err(e) = std::fs::create_dir_all(dir) {
+        update_status(
+            app,
+            "error",
+            &format!("Failed to create data directory: {}", e),
+            0,
+        );
+        return false;
+    }
+
     let backup = std::env::temp_dir().join("gladiator_preserve");
     let _ = std::fs::remove_dir_all(&backup);
     let old_backend = dir.join("backend");

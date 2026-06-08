@@ -2,17 +2,17 @@
 
 ### Windows
 
-**Recommended — try this first:**
-- [**Gladiator_<version>_x64_en-US.msi**](https://github.com/Nicholas-Wilkins/Gladiator/releases/download/v<version>/Gladiator_<version>_x64_en-US.msi)
-  Microsoft Installer. Cleanest install — integrates with Add/Remove Programs and supports silent install.
-  1. Download the MSI from the link above.
+**Recommended for most users — try this first:**
+- [**Gladiator_<version>_x64-setup.exe**](https://github.com/Nicholas-Wilkins/Gladiator/releases/download/v<version>/Gladiator_<version>_x64-setup.exe)
+  NSIS installer. Simple, familiar setup wizard with a modern UI.
+  1. Download the `.exe` from the link above.
   2. Run the installer.
   3. If Windows Defender shows a warning, click **More info**, then click **Run anyway**.
   4. Follow the prompts — Gladiator will be installed and available from your Start menu.
 
-**Alternative:**
-- [**Gladiator_<version>_x64-setup.exe**](https://github.com/Nicholas-Wilkins/Gladiator/releases/download/v<version>/Gladiator_<version>_x64-setup.exe)
-  NSIS installer. Use if the MSI fails or you prefer a portable-style setup.
+**Enterprise / IT-admin deployment:**
+- [**Gladiator_<version>_x64_en-US.msi**](https://github.com/Nicholas-Wilkins/Gladiator/releases/download/v<version>/Gladiator_<version>_x64_en-US.msi)
+  Microsoft Installer. Integrates with Add/Remove Programs, supports silent install (`msiexec /i ...`), and can be deployed via Group Policy or SCCM.
 
 ### Linux
 
