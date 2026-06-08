@@ -20,7 +20,10 @@
     "resources": [],
     "windows": {
       "wix": {},
-      "nsis": {}
+      "nsis": {
+        "installerIcon": "icons/icon.ico",
+        "uninstallerIcon": "icons/icon.ico"
+      }
     },
     "linux": {
       "appimage": {},
