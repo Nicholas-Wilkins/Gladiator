@@ -656,7 +656,7 @@ function renderPlayBoard() {
       if (isLastMove) cls += " last-move";
 
       const pieceHtml = piece ? (() => {
-        const pt = {'♙':'pawn','♘':'knight','♗':'bishop','♖':'rook','♕':'queen','♔':'king','♟':'pawn','♞':'knight','♝':'bishop','♜':'rook','♛':'queen','♚':'king'}[piece.symbol] || '';
+        const pt = {'♟':'pawn','♞':'knight','♝':'bishop','♜':'rook','♛':'queen','♚':'king'}[piece.symbol] || '';
         const extra = pt ? ` piece-${pt}` : '';
         return `<span class="piece-${piece.color}${extra}">${escapeHtml(piece.symbol)}</span>`;
       })() : "";
@@ -741,16 +741,12 @@ function applyMoveLocally(board, fromSq, toSq, promoUci) {
 
   const movingPiece = fromCell.piece;
   const capturedPiece = toCell.piece;
-  const symToType = {'♙':'p','♘':'n','♗':'b','♖':'r','♕':'q','♔':'k','♟':'p','♞':'n','♝':'b','♜':'r','♛':'q','♚':'k'};
+  const symToType = {'♟':'p','♞':'n','♝':'b','♜':'r','♛':'q','♚':'k'};
   const movingType = symToType[movingPiece.symbol] || '?';
 
   if (promoUci && promoUci.length === 5 && movingType === 'p') {
-    const promoSymbols = {
-      white: {'q':'♕','r':'♖','b':'♗','n':'♘'},
-      black: {'q':'♛','r':'♜','b':'♝','n':'♞'},
-    };
-    const color = movingPiece.color;
-    toCell.piece = { symbol: (promoSymbols[color] || promoSymbols.black)[promoUci[4]] || (color === 'white' ? '♕' : '♛'), color };
+    const promoSymbols = {'q':'♛','r':'♜','b':'♝','n':'♞'};
+    toCell.piece = { symbol: promoSymbols[promoUci[4]] || '♛', color: movingPiece.color };
   } else {
     toCell.piece = movingPiece;
   }

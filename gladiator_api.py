@@ -61,9 +61,9 @@ ws_lock = asyncio.Lock()
 
 
 _PIECE_SYMBOLS = {
-    (chess.PAWN, chess.WHITE): "♙", (chess.KNIGHT, chess.WHITE): "♘",
-    (chess.BISHOP, chess.WHITE): "♗", (chess.ROOK, chess.WHITE): "♖",
-    (chess.QUEEN, chess.WHITE): "♕", (chess.KING, chess.WHITE): "♔",
+    (chess.PAWN, chess.WHITE): "♟", (chess.KNIGHT, chess.WHITE): "♞",
+    (chess.BISHOP, chess.WHITE): "♝", (chess.ROOK, chess.WHITE): "♜",
+    (chess.QUEEN, chess.WHITE): "♛", (chess.KING, chess.WHITE): "♚",
     (chess.PAWN, chess.BLACK): "♟", (chess.KNIGHT, chess.BLACK): "♞",
     (chess.BISHOP, chess.BLACK): "♝", (chess.ROOK, chess.BLACK): "♜",
     (chess.QUEEN, chess.BLACK): "♛", (chess.KING, chess.BLACK): "♚",

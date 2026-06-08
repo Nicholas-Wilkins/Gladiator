@@ -346,6 +346,13 @@ tr:hover td { background: var(--bg-tertiary); }
   to { transform: translateX(0); opacity: 1; }
 }
 
+/* Chess piece font — DejaVu Sans for consistent glyphs across platforms */
+@font-face {
+  font-family: 'Chess Fallback';
+  src: url('fonts/DejaVuSans.woff2') format('woff2');
+  unicode-range: U+2654-265F;
+}
+
 /* Chess board */
 .chess-board {
   display: grid;
@@ -354,7 +361,7 @@ tr:hover td { background: var(--bg-tertiary); }
   overflow: hidden;
   flex-shrink: 0;
 }
-.chess-board .sq { text-align: center; user-select: none; }
+.chess-board .sq { text-align: center; user-select: none; font-family: 'Chess Fallback', system-ui, sans-serif; }
 .chess-board .sl { background: #f0d9b5; }
 .chess-board .sd { background: #b58863; }
 .chess-board .pw { color: #fff; -webkit-text-stroke: 1.2px #222; text-shadow: 0 0 1px #222; }
@@ -522,6 +529,7 @@ tr:hover td { background: var(--bg-tertiary); }
   align-items: center;
   justify-content: center;
   font-size: 28px;
+  font-family: 'Chess Fallback', system-ui, sans-serif;
   cursor: pointer;
   transition: background 0.1s;
   position: relative;
@@ -565,11 +573,12 @@ body.dragging-piece .play-board .sq.sd:hover { background: #8f9cb5 !important; }
   position: fixed;
   pointer-events: none;
   z-index: 9999;
+  font-family: 'Chess Fallback', system-ui, sans-serif;
   font-size: 42px;
   transform: translate(-50%, -50%);
 }
-.piece-knight, .piece-rook, .piece-queen, .piece-king { font-size: 42px; }
-.piece-bishop { font-size: 52px; }
+.piece-knight, .piece-rook, .piece-queen, .piece-king { font-family: 'Chess Fallback', system-ui, sans-serif; font-size: 42px; }
+.piece-bishop { font-family: 'Chess Fallback', system-ui, sans-serif; font-size: 52px; }
 #play-sidebar {
   flex: 1;
   max-width: 240px;
