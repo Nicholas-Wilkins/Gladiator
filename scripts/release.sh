@@ -137,6 +137,7 @@ else
   EXE=""
   [ -f "$RELEASE_DIR/Gladiator.exe" ] && EXE="Gladiator.exe"
   [ -z "$EXE" ] && [ -f "$RELEASE_DIR/gladiator-gui.exe" ] && EXE="gladiator-gui.exe"
+  [ -z "$EXE" ] && EXE="$(ls "$RELEASE_DIR"/*.exe 2>/dev/null | head -1)"
   if [ -n "$EXE" ]; then
     echo "[2/4] Creating and signing Windows portable zip from $EXE..." >&2
     mkdir -p "$NSIS_DIR"

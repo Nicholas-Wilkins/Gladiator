@@ -122,12 +122,16 @@ jobs:
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
           cd gui/src-tauri/target/release
-          # Tauri v2 creates the binary with the Cargo package name
+          echo "Contents of target/release:"
+          ls -la || true
           EXE=""
           [ -f "Gladiator.exe" ] && EXE="Gladiator.exe"
           [ -z "$EXE" ] && [ -f "gladiator-gui.exe" ] && EXE="gladiator-gui.exe"
+          [ -z "$EXE" ] && EXE="$(ls *.exe 2>/dev/null | head -1)"
           if [ -z "$EXE" ]; then
-            echo "ERROR: could not find Gladiator.exe or gladiator-gui.exe" >&2
+            echo "ERROR: no .exe found in target/release" >&2
+            echo "Trying broader search:" >&2
+            find . -name "*.exe" -maxdepth 2 2>/dev/null || true
             exit 1
           fi
           echo "Packaging $EXE as portable zip..."
