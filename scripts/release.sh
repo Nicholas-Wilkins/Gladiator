@@ -69,9 +69,9 @@ sign_file() {
 
   # Prefer `tauri` (npm @tauri-apps/cli) over `cargo tauri` (cargo install tauri-cli)
   if command -v tauri &> /dev/null; then
-    out=$(tauri signer sign -f "$key" -p "$password" "$path" 2>/dev/null)
+    out=$(tauri signer sign -f "$key" -p "$password" "$path")
   elif command -v cargo-tauri &> /dev/null; then
-    out=$(cargo tauri signer sign -f "$key" -p "$password" "$path" 2>/dev/null)
+    out=$(cargo tauri signer sign -f "$key" -p "$password" "$path")
   else
     echo "  [error] No tauri CLI found (install @tauri-apps/cli via npm or tauri-cli via cargo)" >&2
     return 1
