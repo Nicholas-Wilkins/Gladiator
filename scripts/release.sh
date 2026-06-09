@@ -64,12 +64,19 @@ sign_file() {
   fi
   echo "  [sign] $label" >&2
   local password="${TAURI_KEY_PASSWORD:-}"
+  local key="${TMP_KEY_FILE:-$KEY_FILE}"
   local out
-  if [ -n "$TMP_KEY_FILE" ]; then
-    out=$(cargo tauri signer sign -f "$TMP_KEY_FILE" -p "$password" "$path" 2>/dev/null)
+
+  # Prefer `tauri` (npm @tauri-apps/cli) over `cargo tauri` (cargo install tauri-cli)
+  if command -v tauri &> /dev/null; then
+    out=$(tauri signer sign -f "$key" -p "$password" "$path" 2>/dev/null)
+  elif command -v cargo-tauri &> /dev/null; then
+    out=$(cargo tauri signer sign -f "$key" -p "$password" "$path" 2>/dev/null)
   else
-    out=$(cargo tauri signer sign -f "$KEY_FILE" -p "$password" "$path" 2>/dev/null)
+    echo "  [error] No tauri CLI found (install @tauri-apps/cli via npm or tauri-cli via cargo)" >&2
+    return 1
   fi
+
   # Extract just the signature line from the multi-line output
   SIG["$label"]="$(echo "$out" | awk '/^Public signature:/{getline; print}')"
   return 0
