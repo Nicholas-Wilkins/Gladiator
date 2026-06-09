@@ -363,11 +363,6 @@ fn is_backend_installed(dir: &PathBuf) -> bool {
     if !installed.exists() {
         return false;
     }
-    if let Ok(stored) = std::fs::read_to_string(&installed) {
-        if stored.trim() != env!("CARGO_PKG_VERSION") {
-            return false;
-        }
-    }
     let py = venv_python(&dir.join(".venv"));
     py.exists() && can_import(&py, "fastapi")
 }
@@ -998,11 +993,6 @@ fn is_backend_installed(dir: &PathBuf) -> bool {
     let installed = dir.join(".installed");
     if !installed.exists() {
         return false;
-    }
-    if let Ok(stored) = std::fs::read_to_string(&installed) {
-        if stored.trim() != env!("CARGO_PKG_VERSION") {
-            return false;
-        }
     }
     let py = venv_python(&dir.join(".venv"));
     if !py.exists() {

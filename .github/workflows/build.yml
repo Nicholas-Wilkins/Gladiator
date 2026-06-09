@@ -184,8 +184,11 @@ jobs:
           find . -type d -name nsis     -exec sh -c 'cp "$1"/* bundle/nsis/'     _ {} \; 2>/dev/null || true
           find . -type d -name dmg     -exec sh -c 'cp "$1"/* bundle/dmg/'     _ {} \; 2>/dev/null || true
 
-          # Generate update notes from the release body template
-          sed "s/<version>/$VERSION/g" scripts/release-body.md > /tmp/update-notes.md
+          # Generate update notes from the tagged commit's message
+          git log -1 --format="%s" > /tmp/update-notes.md
+
+          # Generate GitHub release body from template
+          sed "s/<version>/$VERSION/g" scripts/release-body.md > /tmp/release-body.md
 
           # Run the release script against the re-structured bundle dir
           BUNDLE_DIR="$PWD/bundle" bash scripts/release.sh "$VERSION" /tmp/update-notes.md > bundle/latest.json
@@ -197,4 +200,5 @@ jobs:
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
+          body_path: /tmp/release-body.md
           files: release/*
