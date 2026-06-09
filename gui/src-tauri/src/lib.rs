@@ -47,6 +47,18 @@ fn get_setup_status(state: tauri::State<SetupStatus>) -> SetupPayload {
     state.0.lock().unwrap().clone()
 }
 
+#[tauri::command]
+fn get_pending_update_notes() -> Option<serde_json::Value> {
+    let path = data_dir().join("last_update.json");
+    if !path.exists() {
+        return None;
+    }
+    let content = std::fs::read_to_string(&path).ok()?;
+    let notes: serde_json::Value = serde_json::from_str(&content).ok()?;
+    let _ = std::fs::remove_file(&path);
+    Some(notes)
+}
+
 // ── Dev mode (used during `cargo tauri dev`) ────────────────────
 
 fn find_project_root() -> PathBuf {
@@ -1396,6 +1408,18 @@ pub fn run() {
                     Ok(updater) => {
                         match updater.check().await {
                             Ok(Some(update)) => {
+                                // Save release notes before installing
+                                let notes_dir = data_dir();
+                                let _ = std::fs::create_dir_all(&notes_dir);
+                                let notes = serde_json::json!({
+                                    "version": update.version,
+                                    "body": update.body,
+                                });
+                                let notes_path = notes_dir.join("last_update.json");
+                                let _ = std::fs::write(
+                                    &notes_path,
+                                    serde_json::to_string_pretty(&notes).unwrap(),
+                                );
                                 let _ = update
                                     .download_and_install(|_, _| {}, || {})
                                     .await;
@@ -1422,7 +1446,7 @@ pub fn run() {
                 }
             }
         })
-        .invoke_handler(tauri::generate_handler![get_setup_status])
+        .invoke_handler(tauri::generate_handler![get_setup_status, get_pending_update_notes])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

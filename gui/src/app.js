@@ -1177,8 +1177,33 @@ setInterval(() => {
 }, 3000);
 
 // ---------------------------------------------------------------------------
+// Update notes overlay (shown after auto-update)
+// ---------------------------------------------------------------------------
+
+async function checkUpdateNotes() {
+  try {
+    const notes = await window.__TAURI__.core.invoke("get_pending_update_notes");
+    if (!notes) return;
+    const overlay = document.getElementById("update-overlay");
+    const versionEl = document.getElementById("update-version");
+    const bodyEl = document.getElementById("update-body");
+    if (!overlay || !versionEl || !bodyEl) return;
+    versionEl.textContent = "v" + (notes.version || "");
+    bodyEl.textContent = notes.body || "No release notes available.";
+    overlay.classList.remove("hidden");
+  } catch (e) {
+    // Silently ignore — no notes or Tauri bridge not available
+  }
+}
+
+document.getElementById("update-dismiss")?.addEventListener("click", () => {
+  document.getElementById("update-overlay")?.classList.add("hidden");
+});
+
+// ---------------------------------------------------------------------------
 // Init
 // ---------------------------------------------------------------------------
 
+checkUpdateNotes();
 connectWS();
 refreshDashboard();
