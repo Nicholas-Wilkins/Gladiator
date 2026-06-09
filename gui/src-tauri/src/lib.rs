@@ -1450,7 +1450,7 @@ pub fn run() {
                                             .timeout(std::time::Duration::from_secs(600))
                                             .build();
                                         let response = agent
-                                            .get(&url)
+                                            .get(url.as_str())
                                             .call()
                                             .map_err(|e| format!("Download failed: {e}"))?;
                                         let mut out = std::fs::File::create(&zip_path)
