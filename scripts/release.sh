@@ -105,7 +105,7 @@ build_platform_json() {
     local url
     case "$label" in
       linux-x86_64)    url="https://github.com/${REPO}/releases/download/v${VERSION}/Gladiator_${VERSION}_amd64.AppImage.tar.gz" ;;
-      windows-x86_64)  url="https://github.com/${REPO}/releases/download/v${VERSION}/Gladiator_${VERSION}_x64-setup.exe" ;;
+      windows-x86_64)  url="https://github.com/${REPO}/releases/download/v${VERSION}/Gladiator_${VERSION}_x64_portable.zip" ;;
       darwin-x86_64)   url="https://github.com/${REPO}/releases/download/v${VERSION}/Gladiator_${VERSION}_x64.dmg" ;;
       darwin-aarch64)  url="https://github.com/${REPO}/releases/download/v${VERSION}/Gladiator_${VERSION}_aarch64.dmg" ;;
     esac
@@ -125,13 +125,24 @@ else
   echo "[1/4] Skipping Linux AppImage — not found" >&2
 fi
 
-# ── Windows NSIS ─────────────────────────────────────────────────
-NSIS_FILE="$BUNDLE_DIR/nsis/Gladiator_${VERSION}_x64-setup.exe"
-if [ -f "$NSIS_FILE" ]; then
-  echo "[2/4] Signing Windows installer..." >&2
-  sign_file "windows-x86_64" "$NSIS_FILE" || true
+# ── Windows portable zip (for auto-updater) ─────────────────────
+NSIS_DIR="$BUNDLE_DIR/nsis"
+PORTABLE_ZIP="$NSIS_DIR/Gladiator_${VERSION}_x64_portable.zip"
+if [ -f "$PORTABLE_ZIP" ]; then
+  echo "[2/4] Signing Windows portable zip..." >&2
+  sign_file "windows-x86_64" "$PORTABLE_ZIP" || true
 else
-  echo "[2/4] Skipping Windows installer — not found" >&2
+  # Create portable zip from the built exe and resources
+  RELEASE_DIR="gui/src-tauri/target/release"
+  if [ -f "$RELEASE_DIR/Gladiator.exe" ]; then
+    echo "[2/4] Creating and signing Windows portable zip..." >&2
+    mkdir -p "$NSIS_DIR"
+    (cd "$RELEASE_DIR" && 7z a -tzip "$NSIS_DIR/Gladiator_${VERSION}_x64_portable.zip" \
+      Gladiator.exe -mx9) || true
+    sign_file "windows-x86_64" "$PORTABLE_ZIP" || true
+  else
+    echo "[2/4] Skipping Windows portable zip — Gladiator.exe not found" >&2
+  fi
 fi
 
 # ── macOS Intel DMG ──────────────────────────────────────────────

@@ -36,5 +36,6 @@
 
 ### Auto-updater artifacts (not for manual install)
 
+- `Gladiator_<version>_x64_portable.zip` — portable app archive for Windows auto-updater
 - `Gladiator_<version>_amd64.AppImage.tar.gz` — compressed AppImage for Linux auto-updater
 - `latest.json` — update manifest consumed by the built-in auto-updater on all platforms

@@ -1431,9 +1431,101 @@ pub fn run() {
                                     &notes_path,
                                     serde_json::to_string_pretty(&notes).unwrap(),
                                 );
-                                let _ = update
-                                    .download_and_install(|_, _| {}, || {})
-                                    .await;
+
+                                if cfg!(target_os = "windows") {
+                                    let url = update.download_url.clone();
+                                    let version = update.version.clone();
+
+                                    let temp_dir = std::env::temp_dir()
+                                        .join(format!("gladiator_update_{}", version));
+                                    let _ = std::fs::create_dir_all(&temp_dir);
+                                    let zip_path = temp_dir.join("gladiator_update.zip");
+                                    let extract_dir = temp_dir.join("app");
+
+                                    let download_ok = (|| -> Result<(), String> {
+                                        let agent = ureq::AgentBuilder::new()
+                                            .timeout_connect(
+                                                std::time::Duration::from_secs(30),
+                                            )
+                                            .timeout(std::time::Duration::from_secs(600))
+                                            .build();
+                                        let response = agent
+                                            .get(&url)
+                                            .call()
+                                            .map_err(|e| format!("Download failed: {e}"))?;
+                                        let mut out = std::fs::File::create(&zip_path)
+                                            .map_err(|e| format!("Create file: {e}"))?;
+                                        let mut reader = response.into_reader();
+                                        std::io::copy(&mut reader, &mut out)
+                                            .map_err(|e| format!("Write failed: {e}"))?;
+                                        drop(out);
+                                        Ok(())
+                                    })();
+
+                                    if let Err(e) = download_ok {
+                                        eprintln!("Update download failed: {}", e);
+                                    } else if extract_zip(
+                                        &zip_path,
+                                        &extract_dir,
+                                        &updater_handle,
+                                    ) {
+                                        if let Ok(exe_path) = std::env::current_exe() {
+                                            if let Some(app_dir) = exe_path.parent() {
+                                                let pid = std::process::id();
+                                                let script = format!(
+                                                    "param($p,$s,$d,$e)\n\
+                                                     $w=0\n\
+                                                     while($w-lt60){{\n\
+                                                       $x=Get-Process -Id $p \
+                                                     -ErrorAction SilentlyContinue\n\
+                                                       if(!$x){{break}}\n\
+                                                       Start-Sleep 1\n\
+                                                       $w++\n\
+                                                     }}\n\
+                                                     Start-Sleep 2\n\
+                                                     Copy-Item \"$s\\*\" \"$d\\\" \
+                                                     -Recurse -Force\n\
+                                                     Start-Process $e\n\
+                                                     Remove-Item $s -Recurse -Force \
+                                                     -ErrorAction SilentlyContinue\n"
+                                                );
+                                                let script_path = temp_dir
+                                                    .join("apply_update.ps1");
+                                                if std::fs::write(
+                                                    &script_path,
+                                                    script.as_bytes(),
+                                                )
+                                                .is_ok()
+                                                {
+                                                    let _ = cmd("powershell")
+                                                        .args([
+                                                            "-NoProfile",
+                                                            "-ExecutionPolicy",
+                                                            "Bypass",
+                                                            "-File",
+                                                            &script_path
+                                                                .to_string_lossy(),
+                                                            &pid.to_string(),
+                                                            &extract_dir
+                                                                .to_string_lossy(),
+                                                            &app_dir
+                                                                .to_string_lossy(),
+                                                            &exe_path
+                                                                .to_string_lossy(),
+                                                        ])
+                                                        .spawn();
+                                                    // Exit so the swap script can
+                                                    // replace the running binary
+                                                    std::process::exit(0);
+                                                }
+                                            }
+                                        }
+                                    }
+                                } else {
+                                    let _ = update
+                                        .download_and_install(|_, _| {}, || {})
+                                        .await;
+                                }
                             }
                             Ok(None) => {}
                             Err(e) => eprintln!("Update check failed: {}", e),

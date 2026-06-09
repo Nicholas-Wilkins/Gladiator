@@ -116,6 +116,16 @@ jobs:
           cd gui/src-tauri/target/release/bundle/appimage
           tar czf "Gladiator_${VERSION}_amd64.AppImage.tar.gz" "Gladiator_${VERSION}_amd64.AppImage"
 
+      - name: Create Windows portable zip
+        if: matrix.os == 'windows-latest' && startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          cd gui/src-tauri/target/release
+          7z a -tzip "Gladiator_${VERSION}_x64_portable.zip" Gladiator.exe -mx9
+          mkdir -p bundle/nsis
+          mv "Gladiator_${VERSION}_x64_portable.zip" bundle/nsis/
+
       - name: List build output
         shell: bash
         run: ls -la gui/src-tauri/target/release/ 2>/dev/null || echo "No target/release directory"
@@ -153,7 +163,7 @@ jobs:
 
           # Copy ALL installer/bundle files to a flat release dir
           mkdir -p release
-          find . -type f \( -name "*.deb" -o -name "*.AppImage" -o -name "*.dmg" -o -name "*.exe" -o -name "*.msi" \) -exec cp {} release/ \;
+          find . -type f \( -name "*.deb" -o -name "*.AppImage" -o -name "*.dmg" -o -name "*.exe" -o -name "*.msi" -o -name "*.zip" \) -exec cp {} release/ \;
 
           # Re-structure into the layout scripts/release.sh expects, for signing
           mkdir -p bundle/appimage bundle/nsis bundle/dmg
@@ -167,8 +177,8 @@ jobs:
           # Run the release script against the re-structured bundle dir
           BUNDLE_DIR="$PWD/bundle" bash scripts/release.sh "$VERSION" /tmp/update-notes.md > bundle/latest.json
 
-          # Copy generated files (tar.gz, latest.json) into the release dir
-          find bundle -type f \( -name "*.tar.gz" -o -name "latest.json" \) -exec cp {} release/ \;
+          # Copy generated files (tar.gz, zip, latest.json) into the release dir
+          find bundle -type f \( -name "*.tar.gz" -o -name "*.zip" -o -name "latest.json" \) -exec cp {} release/ \;
           ls -la release/
 
       - name: Create Release
