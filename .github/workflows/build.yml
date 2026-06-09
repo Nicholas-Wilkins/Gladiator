@@ -161,8 +161,11 @@ jobs:
           find . -type d -name msi     -exec sh -c 'cp "$1"/* bundle/msi/'     _ {} \; 2>/dev/null || true
           find . -type d -name dmg     -exec sh -c 'cp "$1"/* bundle/dmg/'     _ {} \; 2>/dev/null || true
 
+          # Generate update notes from the release body template
+          sed "s/<version>/$VERSION/g" scripts/release-body.md > /tmp/update-notes.md
+
           # Run the release script against the re-structured bundle dir
-          BUNDLE_DIR="$PWD/bundle" bash scripts/release.sh "$VERSION" > bundle/latest.json
+          BUNDLE_DIR="$PWD/bundle" bash scripts/release.sh "$VERSION" /tmp/update-notes.md > bundle/latest.json
 
           # Copy generated files (tar.gz, latest.json) into the release dir
           find bundle -type f \( -name "*.tar.gz" -o -name "latest.json" \) -exec cp {} release/ \;

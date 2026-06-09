@@ -133,10 +133,11 @@ else
 fi
 
 # ── Generate latest.json ────────────────────────────────────────
-NOTES=""
+NOTES_RAW=""
 if [ -n "$NOTES_FILE" ] && [ -f "$NOTES_FILE" ]; then
-  NOTES=$(tr -d '\n' < "$NOTES_FILE")
+  NOTES_RAW=$(cat "$NOTES_FILE")
 fi
+NOTES_JSON=$(printf '%s' "$NOTES_RAW" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')
 
 PUB_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 PLATFORMS=$(build_platform_json)
@@ -144,7 +145,7 @@ PLATFORMS=$(build_platform_json)
 cat <<JSON
 {
   "version": "${VERSION}",
-  "notes": "${NOTES}",
+  "notes": ${NOTES_JSON},
   "pub_date": "${PUB_DATE}",
   "platforms": {
 ${PLATFORMS}
