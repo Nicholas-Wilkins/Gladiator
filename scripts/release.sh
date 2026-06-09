@@ -67,14 +67,27 @@ sign_file() {
   local key="${TMP_KEY_FILE:-$KEY_FILE}"
   local out
 
-  # Prefer `tauri` (npm @tauri-apps/cli) over `cargo tauri` (cargo install tauri-cli)
-  if command -v tauri &> /dev/null; then
-    out=$(tauri signer sign -f "$key" -p "$password" "$path")
-  elif command -v cargo-tauri &> /dev/null; then
-    out=$(cargo tauri signer sign -f "$key" -p "$password" "$path")
+  # Prefer `tauri` (npm @tauri-apps/cli) over `cargo tauri` (cargo install tauri-cli).
+  # Both CLIs read TAURI_SIGNING_PRIVATE_KEY from the environment automatically;
+  # only pass -f (key file) when the env var isn't set (local dev).
+  if [ -n "${TAURI_SIGNING_PRIVATE_KEY:-}" ]; then
+    if command -v tauri &> /dev/null; then
+      out=$(tauri signer sign -p "$password" "$path")
+    elif command -v cargo-tauri &> /dev/null; then
+      out=$(cargo tauri signer sign -p "$password" "$path")
+    else
+      echo "  [error] No tauri CLI found (install @tauri-apps/cli via npm or tauri-cli via cargo)" >&2
+      return 1
+    fi
   else
-    echo "  [error] No tauri CLI found (install @tauri-apps/cli via npm or tauri-cli via cargo)" >&2
-    return 1
+    if command -v tauri &> /dev/null; then
+      out=$(tauri signer sign -f "$key" -p "$password" "$path")
+    elif command -v cargo-tauri &> /dev/null; then
+      out=$(cargo tauri signer sign -f "$key" -p "$password" "$path")
+    else
+      echo "  [error] No tauri CLI found (install @tauri-apps/cli via npm or tauri-cli via cargo)" >&2
+      return 1
+    fi
   fi
 
   # Extract just the signature line from the multi-line output
