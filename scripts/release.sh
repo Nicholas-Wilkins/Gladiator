@@ -134,14 +134,17 @@ if [ -f "$PORTABLE_ZIP" ]; then
 else
   # Create portable zip from the built exe and resources
   RELEASE_DIR="gui/src-tauri/target/release"
-  if [ -f "$RELEASE_DIR/Gladiator.exe" ]; then
-    echo "[2/4] Creating and signing Windows portable zip..." >&2
+  EXE=""
+  [ -f "$RELEASE_DIR/Gladiator.exe" ] && EXE="Gladiator.exe"
+  [ -z "$EXE" ] && [ -f "$RELEASE_DIR/gladiator-gui.exe" ] && EXE="gladiator-gui.exe"
+  if [ -n "$EXE" ]; then
+    echo "[2/4] Creating and signing Windows portable zip from $EXE..." >&2
     mkdir -p "$NSIS_DIR"
     (cd "$RELEASE_DIR" && 7z a -tzip "$NSIS_DIR/Gladiator_${VERSION}_x64_portable.zip" \
-      Gladiator.exe -mx9) || true
+      "$EXE" -mx9) || true
     sign_file "windows-x86_64" "$PORTABLE_ZIP" || true
   else
-    echo "[2/4] Skipping Windows portable zip — Gladiator.exe not found" >&2
+    echo "[2/4] Skipping Windows portable zip — no exe found in $RELEASE_DIR" >&2
   fi
 fi
 

@@ -122,7 +122,16 @@ jobs:
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
           cd gui/src-tauri/target/release
-          7z a -tzip "Gladiator_${VERSION}_x64_portable.zip" Gladiator.exe -mx9
+          # Tauri v2 creates the binary with the Cargo package name
+          EXE=""
+          [ -f "Gladiator.exe" ] && EXE="Gladiator.exe"
+          [ -z "$EXE" ] && [ -f "gladiator-gui.exe" ] && EXE="gladiator-gui.exe"
+          if [ -z "$EXE" ]; then
+            echo "ERROR: could not find Gladiator.exe or gladiator-gui.exe" >&2
+            exit 1
+          fi
+          echo "Packaging $EXE as portable zip..."
+          7z a -tzip "Gladiator_${VERSION}_x64_portable.zip" "$EXE" -mx9
           mkdir -p bundle/nsis
           mv "Gladiator_${VERSION}_x64_portable.zip" bundle/nsis/
 
