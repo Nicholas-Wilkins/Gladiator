@@ -1396,12 +1396,13 @@ pub fn run() {
                 progress: 0,
             })));
             let handle = app.handle().clone();
-            let updater_handle = handle.clone();
 
             if cfg!(debug_assertions) {
                 start_dev_server(&handle);
                 std::thread::sleep(std::time::Duration::from_secs(2));
             } else {
+                let updater_handle = handle.clone();
+
                 std::thread::spawn(move || {
                     let dir = data_dir();
                     if !is_backend_installed(&dir) {
@@ -1411,28 +1412,27 @@ pub fn run() {
                     }
                     start_production_server(&handle);
                 });
-            }
 
-            // Check for app updates on startup
-            tauri::async_runtime::spawn(async move {
-                match updater_handle.updater() {
-                    Ok(updater) => {
-                        match updater.check().await {
-                            Ok(Some(update)) => {
-                                // Save release notes before installing
-                                let notes_dir = data_dir();
-                                let _ = std::fs::create_dir_all(&notes_dir);
-                                let notes = serde_json::json!({
-                                    "version": update.version,
-                                    "body": update.body,
-                                });
-                                let notes_path = notes_dir.join("last_update.json");
-                                let _ = std::fs::write(
-                                    &notes_path,
-                                    serde_json::to_string_pretty(&notes).unwrap(),
-                                );
+                // Check for app updates on startup (release builds only)
+                tauri::async_runtime::spawn(async move {
+                    match updater_handle.updater() {
+                        Ok(updater) => {
+                            match updater.check().await {
+                                Ok(Some(update)) => {
+                                    // Save release notes before installing
+                                    let notes_dir = data_dir();
+                                    let _ = std::fs::create_dir_all(&notes_dir);
+                                    let notes = serde_json::json!({
+                                        "version": update.version,
+                                        "body": update.body,
+                                    });
+                                    let notes_path = notes_dir.join("last_update.json");
+                                    let _ = std::fs::write(
+                                        &notes_path,
+                                        serde_json::to_string_pretty(&notes).unwrap(),
+                                    );
 
-                                if cfg!(target_os = "windows") {
+                                    if cfg!(target_os = "windows") {
                                     let url = update.download_url.clone();
                                     let version = update.version.clone();
 
@@ -1534,6 +1534,7 @@ pub fn run() {
                     Err(e) => eprintln!("Updater init failed: {}", e),
                 }
             });
+            }
 
             Ok(())
         })
