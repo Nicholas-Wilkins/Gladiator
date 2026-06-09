@@ -1371,6 +1371,108 @@ fn start_production_server(app_handle: &tauri::AppHandle) {
     }
 }
 
+// ── Synchronous Windows update check (before any window) ─────────
+
+#[cfg(target_os = "windows")]
+fn is_newer_version() -> Option<String> {
+    let url = "https://github.com/Nicholas-Wilkins/Gladiator/releases/latest/download/latest.json";
+    let agent = ureq::AgentBuilder::new()
+        .timeout_connect(Duration::from_secs(10))
+        .timeout(Duration::from_secs(30))
+        .build();
+    let response = agent.get(url).call().ok()?;
+    let body: String = response.into_string().ok()?;
+    let json: serde_json::Value = serde_json::from_str(&body).ok()?;
+    let latest_ver = json.get("version")?.as_str()?;
+    let current = env!("CARGO_PKG_VERSION");
+    let latest_parts: Vec<u32> = latest_ver.split('.').filter_map(|p| p.parse().ok()).collect();
+    let current_parts: Vec<u32> = current.split('.').filter_map(|p| p.parse().ok()).collect();
+    if latest_parts.len() == 3 && current_parts.len() == 3
+        && (latest_parts[0] > current_parts[0]
+            || (latest_parts[0] == current_parts[0] && latest_parts[1] > current_parts[1])
+            || (latest_parts[0] == current_parts[0] && latest_parts[1] == current_parts[1]
+                && latest_parts[2] > current_parts[2]))
+    {
+        let dl_url = json.get("platforms")?.get("windows-x86_64")?.get("url")?.as_str()?;
+        Some(dl_url.to_string())
+    } else {
+        None
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn synchronous_windows_update_check(app: &tauri::App) {
+    let url = match is_newer_version() {
+        Some(u) => u,
+        None => return,
+    };
+    let dest_dir = std::env::temp_dir().join("gladiator_update");
+    let _ = std::fs::create_dir_all(&dest_dir);
+    let zip_path = dest_dir.join("gladiator_update.zip");
+    let extract_dir = dest_dir.join("app");
+    let agent = ureq::AgentBuilder::new()
+        .timeout_connect(Duration::from_secs(30))
+        .timeout(Duration::from_secs(600))
+        .build();
+    let response = match agent.get(&url).call() {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("Update download failed: {e}");
+            return;
+        }
+    };
+    let mut out = match std::fs::File::create(&zip_path) {
+        Ok(f) => f,
+        Err(e) => {
+            eprintln!("Create file: {e}");
+            return;
+        }
+    };
+    if std::io::copy(&mut response.into_reader(), &mut out).is_err() {
+        return;
+    }
+    drop(out);
+    if !extract_zip(&zip_path, &extract_dir, app.handle()) {
+        return;
+    }
+    if let Ok(exe_path) = std::env::current_exe() {
+        if let Some(app_dir) = exe_path.parent() {
+            let pid = std::process::id();
+            let script = format!(
+                "param($p,$s,$d,$e)\n\
+                 $w=0\n\
+                 while($w-lt60){{\n\
+                   $x=Get-Process -Id $p -ErrorAction SilentlyContinue\n\
+                   if(!$x){{break}}\n\
+                   Start-Sleep 1\n\
+                   $w++\n\
+                 }}\n\
+                 Start-Sleep 2\n\
+                 Copy-Item \"$s\\*\" \"$d\\\" -Recurse -Force\n\
+                 Start-Process $e\n\
+                 Remove-Item $s -Recurse -Force -ErrorAction SilentlyContinue\n"
+            );
+            let script_path = dest_dir.join("apply_update.ps1");
+            if std::fs::write(&script_path, script.as_bytes()).is_ok() {
+                let _ = cmd("powershell")
+                    .args([
+                        "-NoProfile",
+                        "-ExecutionPolicy",
+                        "Bypass",
+                        "-File",
+                        &script_path.to_string_lossy(),
+                        &pid.to_string(),
+                        &extract_dir.to_string_lossy(),
+                        &app_dir.to_string_lossy(),
+                        &exe_path.to_string_lossy(),
+                    ])
+                    .spawn();
+                std::process::exit(0);
+            }
+        }
+    }
+}
+
 // ── Entry point ─────────────────────────────────────────────────
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -1391,6 +1493,10 @@ pub fn run() {
                 start_dev_server(&handle);
                 std::thread::sleep(std::time::Duration::from_secs(2));
             } else {
+                #[cfg(target_os = "windows")]
+                synchronous_windows_update_check(app);
+
+                #[cfg(not(target_os = "windows"))]
                 let updater_handle = handle.clone();
 
                 std::thread::spawn(move || {
@@ -1404,127 +1510,36 @@ pub fn run() {
                 });
 
                 // Check for app updates on startup (release builds only)
+                #[cfg(not(target_os = "windows"))]
                 tauri::async_runtime::spawn(async move {
-                    match updater_handle.updater() {
-                        Ok(updater) => {
-                            match updater.check().await {
-                                Ok(Some(update)) => {
-                                    // Save release notes before installing
-                                    let notes_dir = data_dir();
-                                    let _ = std::fs::create_dir_all(&notes_dir);
-                                    let notes = serde_json::json!({
-                                        "version": update.version,
-                                        "body": update.body,
-                                    });
-                                    let notes_path = notes_dir.join("last_update.json");
-                                    let _ = std::fs::write(
-                                        &notes_path,
-                                        serde_json::to_string_pretty(&notes).unwrap(),
-                                    );
+                        match updater_handle.updater() {
+                            Ok(updater) => {
+                                match updater.check().await {
+                                    Ok(Some(update)) => {
+                                        let notes_dir = data_dir();
+                                        let _ = std::fs::create_dir_all(&notes_dir);
+                                        let notes = serde_json::json!({
+                                            "version": update.version,
+                                            "body": update.body,
+                                        });
+                                        let notes_path = notes_dir.join("last_update.json");
+                                        let _ = std::fs::write(
+                                            &notes_path,
+                                            serde_json::to_string_pretty(&notes).unwrap(),
+                                        );
 
-                                    if cfg!(target_os = "windows") {
-                                    let url = update.download_url.clone();
-                                    let version = update.version.clone();
-
-                                    let temp_dir = std::env::temp_dir()
-                                        .join(format!("gladiator_update_{}", version));
-                                    let _ = std::fs::create_dir_all(&temp_dir);
-                                    let zip_path = temp_dir.join("gladiator_update.zip");
-                                    let extract_dir = temp_dir.join("app");
-
-                                    let download_ok = (|| -> Result<(), String> {
-                                        let agent = ureq::AgentBuilder::new()
-                                            .timeout_connect(
-                                                std::time::Duration::from_secs(30),
-                                            )
-                                            .timeout(std::time::Duration::from_secs(600))
-                                            .build();
-                                        let response = agent
-                                            .get(url.as_str())
-                                            .call()
-                                            .map_err(|e| format!("Download failed: {e}"))?;
-                                        let mut out = std::fs::File::create(&zip_path)
-                                            .map_err(|e| format!("Create file: {e}"))?;
-                                        let mut reader = response.into_reader();
-                                        std::io::copy(&mut reader, &mut out)
-                                            .map_err(|e| format!("Write failed: {e}"))?;
-                                        drop(out);
-                                        Ok(())
-                                    })();
-
-                                    if let Err(e) = download_ok {
-                                        eprintln!("Update download failed: {}", e);
-                                    } else if extract_zip(
-                                        &zip_path,
-                                        &extract_dir,
-                                        &updater_handle,
-                                    ) {
-                                        if let Ok(exe_path) = std::env::current_exe() {
-                                            if let Some(app_dir) = exe_path.parent() {
-                                                let pid = std::process::id();
-                                                let script = format!(
-                                                    "param($p,$s,$d,$e)\n\
-                                                     $w=0\n\
-                                                     while($w-lt60){{\n\
-                                                       $x=Get-Process -Id $p \
-                                                     -ErrorAction SilentlyContinue\n\
-                                                       if(!$x){{break}}\n\
-                                                       Start-Sleep 1\n\
-                                                       $w++\n\
-                                                     }}\n\
-                                                     Start-Sleep 2\n\
-                                                     Copy-Item \"$s\\*\" \"$d\\\" \
-                                                     -Recurse -Force\n\
-                                                     Start-Process $e\n\
-                                                     Remove-Item $s -Recurse -Force \
-                                                     -ErrorAction SilentlyContinue\n"
-                                                );
-                                                let script_path = temp_dir
-                                                    .join("apply_update.ps1");
-                                                if std::fs::write(
-                                                    &script_path,
-                                                    script.as_bytes(),
-                                                )
-                                                .is_ok()
-                                                {
-                                                    let _ = cmd("powershell")
-                                                        .args([
-                                                            "-NoProfile",
-                                                            "-ExecutionPolicy",
-                                                            "Bypass",
-                                                            "-File",
-                                                            &script_path
-                                                                .to_string_lossy(),
-                                                            &pid.to_string(),
-                                                            &extract_dir
-                                                                .to_string_lossy(),
-                                                            &app_dir
-                                                                .to_string_lossy(),
-                                                            &exe_path
-                                                                .to_string_lossy(),
-                                                        ])
-                                                        .spawn();
-                                                    // Exit so the swap script can
-                                                    // replace the running binary
-                                                    std::process::exit(0);
-                                                }
-                                            }
-                                        }
+                                        let _ = update
+                                            .download_and_install(|_, _| {}, || {})
+                                            .await;
                                     }
-                                } else {
-                                    let _ = update
-                                        .download_and_install(|_, _| {}, || {})
-                                        .await;
+                                    Ok(None) => {}
+                                    Err(e) => eprintln!("Update check failed: {}", e),
                                 }
                             }
-                            Ok(None) => {}
-                            Err(e) => eprintln!("Update check failed: {}", e),
+                            Err(e) => eprintln!("Updater init failed: {}", e),
                         }
-                    }
-                    Err(e) => eprintln!("Updater init failed: {}", e),
+                    });
                 }
-            });
-            }
 
             Ok(())
         })
