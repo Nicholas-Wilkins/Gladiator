@@ -156,9 +156,9 @@ jobs:
           find . -type f \( -name "*.deb" -o -name "*.AppImage" -o -name "*.dmg" -o -name "*.exe" -o -name "*.msi" \) -exec cp {} release/ \;
 
           # Re-structure into the layout scripts/release.sh expects, for signing
-          mkdir -p bundle/appimage bundle/msi bundle/dmg
+          mkdir -p bundle/appimage bundle/nsis bundle/dmg
           find . -type d -name appimage -exec sh -c 'cp "$1"/* bundle/appimage/' _ {} \; 2>/dev/null || true
-          find . -type d -name msi     -exec sh -c 'cp "$1"/* bundle/msi/'     _ {} \; 2>/dev/null || true
+          find . -type d -name nsis     -exec sh -c 'cp "$1"/* bundle/nsis/'     _ {} \; 2>/dev/null || true
           find . -type d -name dmg     -exec sh -c 'cp "$1"/* bundle/dmg/'     _ {} \; 2>/dev/null || true
 
           # Generate update notes from the release body template

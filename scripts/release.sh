@@ -105,7 +105,7 @@ build_platform_json() {
     local url
     case "$label" in
       linux-x86_64)    url="https://github.com/${REPO}/releases/download/v${VERSION}/Gladiator_${VERSION}_amd64.AppImage.tar.gz" ;;
-      windows-x86_64)  url="https://github.com/${REPO}/releases/download/v${VERSION}/Gladiator_${VERSION}_x64_en-US.msi" ;;
+      windows-x86_64)  url="https://github.com/${REPO}/releases/download/v${VERSION}/Gladiator_${VERSION}_x64-setup.exe" ;;
       darwin-x86_64)   url="https://github.com/${REPO}/releases/download/v${VERSION}/Gladiator_${VERSION}_x64.dmg" ;;
       darwin-aarch64)  url="https://github.com/${REPO}/releases/download/v${VERSION}/Gladiator_${VERSION}_aarch64.dmg" ;;
     esac
@@ -125,13 +125,13 @@ else
   echo "[1/4] Skipping Linux AppImage — not found" >&2
 fi
 
-# ── Windows MSI ──────────────────────────────────────────────────
-MSI_FILE="$BUNDLE_DIR/msi/Gladiator_${VERSION}_x64_en-US.msi"
-if [ -f "$MSI_FILE" ]; then
-  echo "[2/4] Signing Windows MSI..." >&2
-  sign_file "windows-x86_64" "$MSI_FILE" || true
+# ── Windows NSIS ─────────────────────────────────────────────────
+NSIS_FILE="$BUNDLE_DIR/nsis/Gladiator_${VERSION}_x64-setup.exe"
+if [ -f "$NSIS_FILE" ]; then
+  echo "[2/4] Signing Windows installer..." >&2
+  sign_file "windows-x86_64" "$NSIS_FILE" || true
 else
-  echo "[2/4] Skipping Windows MSI — not found" >&2
+  echo "[2/4] Skipping Windows installer — not found" >&2
 fi
 
 # ── macOS Intel DMG ──────────────────────────────────────────────

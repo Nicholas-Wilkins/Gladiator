@@ -624,10 +624,21 @@ fn install_backend(dir: &PathBuf, app: &tauri::AppHandle) -> bool {
 
     // Install pip dependencies from requirements.txt with uv.
     update_status(app, "deps", "Installing Python packages\u{2026}", 60);
+
+    // Clear uv's distribution cache to avoid Windows untrusted mount point errors
+    // (os error 448) that occur when the app has been moved by an installer update.
+    let mut cache_clean = cmd(&uv_path.to_string_lossy());
+    cache_clean.args(["cache", "clean"]);
+    let _ = cache_clean.output();
+    // Use a fresh cache dir inside our data dir so we don't inherit stale paths.
+    let uv_cache_dir = dir.join(".uv-cache");
+    let _ = std::fs::create_dir_all(&uv_cache_dir);
+
     let req_path = backend_dir.join("requirements.txt");
     let mut pip_cmd = cmd(&uv_path.to_string_lossy());
     pip_cmd.args(["pip", "install", "-r", &req_path.to_string_lossy()]);
     pip_cmd.current_dir(&dir);
+    pip_cmd.env("UV_CACHE_DIR", &uv_cache_dir);
     pip_cmd.env_remove("PYTHONHOME");
     match pip_cmd.output() {
         Ok(out) if out.status.success() => {}

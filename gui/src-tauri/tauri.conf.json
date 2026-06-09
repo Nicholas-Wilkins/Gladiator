@@ -21,6 +21,7 @@
     "windows": {
       "wix": {},
       "nsis": {
+        "installMode": "perUser",
         "installerIcon": "icons/icon.ico",
         "uninstallerIcon": "icons/icon.ico"
       }
