@@ -160,62 +160,6 @@ fn data_dir() -> PathBuf {
     base.join("gladiator")
 }
 
-fn download_file(url: &str, dest: &PathBuf, app: &tauri::AppHandle) -> bool {
-    let _ = std::fs::remove_file(dest);
-
-    let tmp = dest.with_extension("tmp");
-    let _ = std::fs::remove_file(&tmp);
-
-    let result = (|| -> Result<(), String> {
-        let agent = ureq::AgentBuilder::new()
-            .timeout_connect(std::time::Duration::from_secs(30))
-            .timeout(std::time::Duration::from_secs(600))
-            .build();
-
-        let response = agent
-            .get(url)
-            .call()
-            .map_err(|e| format!("Download failed: {e}"))?;
-
-        let mut out =
-            std::fs::File::create(&tmp).map_err(|e| format!("Failed to create temp file: {e}"))?;
-
-        let mut reader = response.into_reader();
-        std::io::copy(&mut reader, &mut out)
-            .map_err(|e| format!("Failed to write response to file: {e}"))?;
-
-        drop(out);
-
-        let len = std::fs::metadata(&tmp)
-            .map_err(|e| format!("Failed to stat temp file: {e}"))?
-            .len();
-
-        if len <= 1_000_000 {
-            return Err(format!(
-                "Downloaded backend is too small ({len} bytes). The release asset may be missing or corrupted."
-            ));
-        }
-
-        // Try rename first (atomic); fall back to copy+delete if the
-        // file is locked by antivirus scanning (common on Windows).
-        if std::fs::rename(&tmp, dest).is_err() {
-            std::fs::copy(&tmp, dest).map_err(|e| format!("Failed to copy temp file: {e}"))?;
-            let _ = std::fs::remove_file(&tmp);
-        }
-
-        Ok(())
-    })();
-
-    match result {
-        Ok(()) => true,
-        Err(msg) => {
-            update_status(app, "error", &msg, 0);
-            let _ = std::fs::remove_file(&tmp);
-            false
-        }
-    }
-}
-
 // ── Windows: venv/pip from bundled source ZIP ──────────────────
 
 #[cfg(target_os = "windows")]

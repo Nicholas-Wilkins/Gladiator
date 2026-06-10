@@ -3,6 +3,9 @@ name = "gladiator-gui"
 version = "0.1.37"
 edition = "2021"
 
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(has_uv_exe)'] }
+
 [lib]
 name = "gladiator_gui_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
