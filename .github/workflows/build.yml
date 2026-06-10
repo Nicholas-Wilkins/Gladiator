@@ -202,3 +202,4 @@ jobs:
         with:
           body_path: /tmp/release-body.md
           files: release/*
+          prerelease: ${{ contains(github.ref_name, '-rc.') || contains(github.ref_name, '-beta.') || contains(github.ref_name, '-alpha.') }}
